@@ -37,6 +37,8 @@ Compiler/Runtime improvements
 Deprecated or removed
 ---------------------
 
+  * `airy`, `airyx` and `airyprime` have been deprecated in favor of more specific functions (`airyai`, `airybi`, `airyaiprime`, `airybiprimex`, `airyaix`, `airybix`, `airyaiprimex`, `airybiprimex`) ([#18050]).
+
 Julia v0.5.0 Release Notes
 ==========================
 
@@ -652,4 +654,5 @@ Language tooling improvements
 [#17546]: https://github.com/JuliaLang/julia/issues/17546
 [#17668]: https://github.com/JuliaLang/julia/issues/17668
 [#17785]: https://github.com/JuliaLang/julia/issues/17785
+[#18050]: https://github.com/JuliaLang/julia/issues/18050
 [#18330]: https://github.com/JuliaLang/julia/issues/18330

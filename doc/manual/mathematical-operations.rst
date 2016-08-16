@@ -562,11 +562,11 @@ Function                                            Description
 :func:`lbeta(x,y) <lbeta>`                          accurate ``log(beta(x,y))`` for large ``x`` or ``y``
 :func:`eta(x) <eta>`                                `Dirichlet eta function <https://en.wikipedia.org/wiki/Dirichlet_eta_function>`_ at ``x``
 :func:`zeta(x) <zeta>`                              `Riemann zeta function <https://en.wikipedia.org/wiki/Riemann_zeta_function>`_ at ``x``
-|airylist|                                          `Airy Ai function <https://en.wikipedia.org/wiki/Airy_function>`_ at ``z``
-|airyprimelist|                                     derivative of the Airy Ai function at ``z``
-:func:`airybi(z) <airybi>`, ``airy(2,z)``           `Airy Bi function <https://en.wikipedia.org/wiki/Airy_function>`_ at ``z``
-:func:`airybiprime(z) <airybiprime>`, ``airy(3,z)`` derivative of the Airy Bi function at ``z``
-:func:`airyx(z) <airyx>`, ``airyx(k,z)``            scaled Airy AI function and ``k`` th derivatives at ``z``
+:func:`airyai(z) <airyai>`                          `Airy Ai function <https://en.wikipedia.org/wiki/Airy_function>`_ at ``z``
+:func:`airyaiprime(z) <airyaiprime>`                derivative of the Airy Ai function at ``z``
+:func:`airybi(z) <airybi>`                          `Airy Bi function <https://en.wikipedia.org/wiki/Airy_function>`_ at ``z``
+:func:`airybiprime(z) <airybiprime>`                derivative of the Airy Bi function at ``z``
+|airyxlist|                                         scaled Airy functions and their derivatives
 :func:`besselj(nu,z) <besselj>`                     `Bessel function <https://en.wikipedia.org/wiki/Bessel_function>`_ of the first kind of order ``nu`` at ``z``
 :func:`besselj0(z) <besselj0>`                      ``besselj(0,z)``
 :func:`besselj1(z) <besselj1>`                      ``besselj(1,z)``
@@ -586,5 +586,4 @@ Function                                            Description
 :func:`besselkx(nu,z) <besselkx>`                   scaled modified Bessel function of the second kind of order ``nu`` at ``z``
 =================================================== ==============================================================================
 
-.. |airylist| replace:: :func:`airy(z) <airy>`, :func:`airyai(z) <airyai>`, ``airy(0,z)``
-.. |airyprimelist| replace:: :func:`airyprime(z) <airyprime>`, :func:`airyaiprime(z) <airyaiprime>`, ``airy(1,z)``
+.. |airyxlist| replace:: :func:`airyaix(z) <airyaix>`, :func:`airyaiprimex(z) <airyaiprimex>`, :func:`airybix(z) <airybix>`, :func:`airybiprimex(z) <airybiprimex>`

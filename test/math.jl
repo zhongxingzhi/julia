@@ -341,26 +341,23 @@ end
 @test erfcinv(one(Int)) == erfcinv(1.0)
 
 # airy
-@test airy(1.8) ≈ airyai(1.8)
-@test airyprime(1.8) ≈ -0.0685247801186109345638
-@test airyaiprime(1.8) ≈ airyprime(1.8)
-@test airybi(1.8) ≈ 2.595869356743906290060
-@test airybiprime(1.8) ≈ 2.98554005084659907283
-@test_throws Base.Math.AmosException airy(200im)
+@test_throws Base.Math.AmosException airyai(200im)
 @test_throws Base.Math.AmosException airybi(200)
-@test_throws ArgumentError airy(5,one(Complex128))
-z = 1.8 + 1.0im
-for elty in [Complex64,Complex128]
-    @test airy(convert(elty,1.8)) ≈ 0.0470362168668458052247
-    z = convert(elty,z)
-    @test airyx(z) ≈ airyx(0,z)
-    @test airyx(0, z) ≈ airy(0, z) * exp(2/3 * z * sqrt(z))
-    @test airyx(1, z) ≈ airy(1, z) * exp(2/3 * z * sqrt(z))
-    @test airyx(2, z) ≈ airy(2, z) * exp(-abs(real(2/3 * z * sqrt(z))))
-    @test airyx(3, z) ≈ airy(3, z) * exp(-abs(real(2/3 * z * sqrt(z))))
-    @test_throws ArgumentError airyx(5,z)
+
+for T in [Float32, Float64, Complex64,Complex128]
+    @test airyai(T(1.8)) ≈ 0.0470362168668458052247
+    @test airyaiprime(T(1.8)) ≈ -0.0685247801186109345638
+    @test airybi(T(1.8)) ≈ 2.595869356743906290060
+    @test airybiprime(T(1.8)) ≈ 2.98554005084659907283
 end
-@test_throws MethodError airy(complex(big(1.0)))
+for T in [Complex64, Complex128]
+    z = convert(T,1.8 + 1.0im)
+    @test airyaix(z) ≈ airyai(z) * exp(2/3 * z * sqrt(z))
+    @test airyaiprimex(z) ≈ airyaiprime(z) * exp(2/3 * z * sqrt(z))
+    @test airybix(z) ≈ airybi(z) * exp(-abs(real(2/3 * z * sqrt(z))))
+    @test airybiprimex(z) ≈ airybiprime(z) * exp(-abs(real(2/3 * z * sqrt(z))))
+end
+@test_throws MethodError airyai(complex(big(1.0)))
 
 # bessely0, bessely1, besselj0, besselj1
 @test besselj0(Float32(2.0)) ≈ besselj0(Float64(2.0))
@@ -848,7 +845,7 @@ end
 # test vectorization of 2-arg vectorized functions
 binary_math_functions = [
     copysign, flipsign, log, atan2, hypot, max, min,
-    airy, airyx, besselh, hankelh1, hankelh2, hankelh1x, hankelh2x,
+    besselh, hankelh1, hankelh2, hankelh1x, hankelh2x,
     besseli, besselix, besselj, besseljx, besselk, besselkx, bessely, besselyx,
     polygamma, zeta, beta, lbeta,
 ]

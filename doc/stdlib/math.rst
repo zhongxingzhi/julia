@@ -1517,47 +1517,53 @@ Mathematical Functions
 
    Compute the polygamma function of order ``m`` of argument ``x`` (the ``(m+1)th`` derivative of the logarithm of ``gamma(x)``\ )
 
-.. function:: airy(k,x)
-
-   .. Docstring generated from Julia source
-
-   The ``k``\ th derivative of the Airy function :math:`\operatorname{Ai}(x)`\ .
-
 .. function:: airyai(x)
 
    .. Docstring generated from Julia source
 
-   Airy function :math:`\operatorname{Ai}(x)`\ .
-
-.. function:: airyprime(x)
-
-   .. Docstring generated from Julia source
-
-   Airy function derivative :math:`\operatorname{Ai}'(x)`\ .
+   Airy function of the first kind :math:`\operatorname{Ai}(x)`\ .
 
 .. function:: airyaiprime(x)
 
    .. Docstring generated from Julia source
 
-   Airy function derivative :math:`\operatorname{Ai}'(x)`\ .
+   Derivative of the Airy function of the first kind :math:`\operatorname{Ai}'(x)`\ .
 
 .. function:: airybi(x)
 
    .. Docstring generated from Julia source
 
-   Airy function :math:`\operatorname{Bi}(x)`\ .
+   Airy function of the second kind :math:`\operatorname{Bi}(x)`\ .
 
 .. function:: airybiprime(x)
 
    .. Docstring generated from Julia source
 
-   Airy function derivative :math:`\operatorname{Bi}'(x)`\ .
+   Derivative of the Airy function of the second kind :math:`\operatorname{Bi}'(x)`\ .
 
-.. function:: airyx(k,x)
+.. function:: airyaix(x)
 
    .. Docstring generated from Julia source
 
-   scaled ``k``\ th derivative of the Airy function, return :math:`\operatorname{Ai}(x) e^{\frac{2}{3} x \sqrt{x}}` for ``k == 0 || k == 1``\ , and :math:`\operatorname{Ai}(x) e^{- \left| \operatorname{Re} \left( \frac{2}{3} x \sqrt{x} \right) \right|}` for ``k == 2 || k == 3``\ .
+   Scaled Airy function of the first kind :math:`\operatorname{Ai}(x) e^{\frac{2}{3} x \sqrt{x}}`\ .
+
+.. function:: airyaiprimex(x)
+
+   .. Docstring generated from Julia source
+
+   Scaled derivative of the Airy function of the first kind :math:`\operatorname{Ai}'(x) e^{\frac{2}{3} x \sqrt{x}}`\ .
+
+.. function:: airybix(x)
+
+   .. Docstring generated from Julia source
+
+   Scaled Airy function of the second kind :math:`\operatorname{Bi}(x) e^{- \left| \operatorname{Re} \left( \frac{2}{3} x \sqrt{x} \right) \right|}`\ .
+
+.. function:: airybiprimex(x)
+
+   .. Docstring generated from Julia source
+
+   Scaled derivative of the Airy function of the second kind :math:`\operatorname{Bi}'(x) e^{- \left| \operatorname{Re} \left( \frac{2}{3} x \sqrt{x} \right) \right|}`\ .
 
 .. function:: besselj0(x)
 

@@ -111,15 +111,12 @@ function ip_matches_func(ip, func::Symbol)
 end
 
 function display_error(io::IO, er, bt)
-    Base.with_output_color(:red, io) do io
-        print(io, "ERROR: ")
-        # remove REPL-related frames from interactive printing
-        eval_ind = findlast(addr->ip_matches_func(addr, :eval), bt)
-        if eval_ind != 0
-            bt = bt[1:eval_ind-1]
-        end
-        Base.showerror(io, er, bt)
+    # remove REPL-related frames from interactive printing
+    eval_ind = findlast(addr->Base.REPL.ip_matches_func(addr, :eval), bt)
+    if eval_ind != 0
+        bt = bt[1:eval_ind-1]
     end
+    showerror(IOContext(io, :REPLError => true), er, bt)
 end
 
 immutable REPLDisplay{R<:AbstractREPL} <: Display
@@ -167,6 +164,7 @@ function print_response(errio::IO, val::ANY, bt, show_value::Bool, have_color::B
         catch err
             if bt !== nothing
                 println(errio, "SYSTEM: show(lasterr) caused an error")
+                println(errio, err)
                 break
             end
             val = err

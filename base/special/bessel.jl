@@ -110,8 +110,13 @@ for afn in (:airyai, :airyaiprime, :airybi, :airybiprime,
         $afn(z::Complex) = $afn(float(z))
         $afn{T<:AbstractFloat}(z::Complex{T}) = throw(MethodError($afn,(z,)))
         $afn(z::Complex64) = Complex64($afn(Complex128(z)))
-        $afn(x::Real) = real($afn(complex(float(x))))
     end
+    if afn in (:airyaix, :airyaiprimex)
+        @eval $afn(x::Real) = x < 0 ? throw(DomainError()) : real($afn(complex(float(x))))
+    else
+        @eval $afn(x::Real) = real($afn(complex(float(x))))
+    end
+
 end
 
 ## Bessel functions

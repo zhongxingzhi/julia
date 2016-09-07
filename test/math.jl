@@ -359,6 +359,22 @@ for T in [Complex64, Complex128]
 end
 @test_throws MethodError airyai(complex(big(1.0)))
 
+for x = -3:3
+    @test airyai(x) ≈ airyai(complex(x))
+    @test airyaiprime(x) ≈ airyaiprime(complex(x))
+    @test airybi(x) ≈ airybi(complex(x))
+    @test airybiprime(x) ≈ airybiprime(complex(x))
+    if x >= 0
+        @test airyaix(x) ≈ airyaix(complex(x))
+        @test airyaiprimex(x) ≈ airyaiprimex(complex(x))
+    else
+        @test_throws DomainError airyaix(x)
+        @test_throws DomainError airyaiprimex(x)
+    end
+    @test airybix(x) ≈ airybix(complex(x))
+    @test airybiprimex(x) ≈ airybiprimex(complex(x))
+end
+
 # bessely0, bessely1, besselj0, besselj1
 @test besselj0(Float32(2.0)) ≈ besselj0(Float64(2.0))
 @test besselj1(Float32(2.0)) ≈ besselj1(Float64(2.0))

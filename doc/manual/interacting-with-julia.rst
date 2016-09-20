@@ -311,5 +311,5 @@ informational messages in cyan you can add the following to your ``juliarc.jl`` 
 
 The backtrace that is printed in the REPL when an error is thrown can also be customized. The color of the function name and the file and line info for each stack frame can be changed with environment variables as::
 
-    ENV["JULIA_BT_FUNCTION_COLOR"] = :green # Color of function names
-    ENV["JULIA_BT_LINFO_COLOR"] = :yellow # Color of file name and line number
+    ENV["JULIA_STACKFRAME_FUNCTION_COLOR"] = :green # Color of function names
+    ENV["JULIA_STACKFRAME_LINFO_COLOR"] = :yellow # Color of file name and line number

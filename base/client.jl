@@ -63,8 +63,8 @@ warn_color()   = repl_color("JULIA_WARN_COLOR", default_color_warn)
 info_color()   = repl_color("JULIA_INFO_COLOR", default_color_info)
 input_color()  = text_colors[repl_color("JULIA_INPUT_COLOR", default_color_input)]
 answer_color() = text_colors[repl_color("JULIA_ANSWER_COLOR", default_color_answer)]
-bt_linfo_color()   = repl_color("JULIA_BT_LINFO_COLOR", :bold)
-bt_funcdef_color() = repl_color("JULIA_BT_FUNCTION_COLOR", :bold)
+stackframe_linfo_color() =    repl_color("JULIA_STACKFRAME_LINFO_COLOR", :bold)
+stackframe_function_color() = repl_color("JULIA_STACKFRAME_FUNCTION_COLOR", :bold)
 
 function repl_cmd(cmd, out)
     shell = shell_split(get(ENV,"JULIA_SHELL",get(ENV,"SHELL","/bin/sh")))

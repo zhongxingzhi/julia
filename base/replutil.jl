@@ -193,25 +193,13 @@ function showerror(io::IO, ex::TypeError)
 end
 
 function showerror(io::IO, ex, bt; backtrace=true)
-   try
-        Base.with_output_color(:red, io) do io
+    try
+        with_output_color(get(io, :hascolor, false) ? :red : :nothing, io) do io
             showerror(io, ex)
         end
     finally
         if backtrace
-            if get(io, :REPLError, false)
-                buffer_bt = IOBuffer()
-                show_backtrace(IOContext(buffer_bt, io), bt)
-                bt_str = takebuf_string(buffer_bt)
-                if !isempty(bt_str)
-                    print(io, "\nStacktrace:")
-                    print(io, bt_str)
-                end
-            else
-                Base.with_output_color(:red, io) do io
-                    show_backtrace(io, bt)
-                end
-            end
+            show_backtrace(io, bt)
         end
     end
 end
@@ -575,28 +563,22 @@ function show_method_candidates(io::IO, ex::MethodError, kwargs::Vector=Any[])
     end
 end
 
-function show_trace_entry(io, frame, n)
-    !get(io, :REPLError, false) && println(io)
-    show(io, frame, full_path=true)
+function show_trace_entry(io, frame, n; prefix = " in ")
+    print(io, "\n")
+    show(io, frame, full_path=true; prefix = prefix)
     n > 1 && print(io, " (repeats ", n, " times)")
 end
 
 function show_backtrace(io::IO, t::Vector)
-    if get(io, :REPLError, false)
-        n_frames = 0
-        stack_counter = 0
-        process_backtrace((a,b) -> n_frames += 1, t)
-        process_entry = (last_frame, n) -> begin
-            println(io)
-            stack_counter += 1
-            n_spaces_align = ndigits(n_frames) - ndigits(stack_counter) + 1
-            print(io, " "^n_spaces_align, "[", stack_counter, "]", )
-            show_trace_entry(io, last_frame, n)
-        end
-    else
-        process_entry = (last_frame, n) -> show_trace_entry(io, last_frame, n)
+    n_frames = 0
+    frame_counter = 0
+    process_backtrace((a,b) -> n_frames += 1, t)
+    n_frames != 0 && print(io, "\n\nStacktrace:")
+    process_entry = (last_frame, n) -> begin
+        frame_counter += 1
+        n_spaces_align = ndigits(n_frames) - ndigits(frame_counter) + 1
+        show_trace_entry(io, last_frame, n, prefix = string(" "^n_spaces_align, "[", frame_counter, "] "))
     end
-
     process_backtrace(process_entry, t)
 end
 

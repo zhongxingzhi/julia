@@ -111,12 +111,13 @@ function ip_matches_func(ip, func::Symbol)
 end
 
 function display_error(io::IO, er, bt)
+    print_with_color(:red, io, "ERROR: ")
     # remove REPL-related frames from interactive printing
     eval_ind = findlast(addr->Base.REPL.ip_matches_func(addr, :eval), bt)
     if eval_ind != 0
         bt = bt[1:eval_ind-1]
     end
-    showerror(IOContext(io, :REPLError => true), er, bt)
+    showerror(IOContext(io, :hascolor => true), er, bt)
 end
 
 immutable REPLDisplay{R<:AbstractREPL} <: Display

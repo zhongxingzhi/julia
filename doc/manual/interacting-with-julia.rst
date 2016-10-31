@@ -302,9 +302,9 @@ appropriate field of ``repl`` in the ``customize_colors`` function above (respec
 is also set to false.
 
 You can also customize the color used to render error, warning and informational messages by
-setting the appropriate environment variable. For instance, to render warning messages in yellow and
-informational messages in cyan you can add the following to your ``juliarc.jl`` file::
+setting the appropriate environment variables. For instance, to render error, warning, and informational
+messages respectively in magenta, yellow, and cyan you can add the following to your ``juliarc.jl`` file::
 
+    ENV["JULIA_ERROR_COLOR"] = :magenta
     ENV["JULIA_WARN_COLOR"] = :yellow
     ENV["JULIA_INFO_COLOR"] = :cyan
-    ENV["JULIA_ERROR_COLOR"] = :magenta

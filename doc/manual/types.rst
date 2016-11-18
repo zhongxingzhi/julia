@@ -652,17 +652,9 @@ unlimited number of types: ``Point{Float64}``, ``Point{AbstractString}``,
 The type ``Point{Float64}`` is a point whose coordinates are 64-bit
 floating-point values, while the type ``Point{AbstractString}`` is a "point"
 whose "coordinates" are string objects (see :ref:`man-strings`).
-However, ``Point`` itself is also a valid type object:
 
-.. doctest::
-
-    julia> Point
-    Point{T}
-
-Here the ``T`` is the dummy type symbol used in the original declaration
-of ``Point``. What does ``Point`` by itself mean? It is a type
-that contains all the specific instances ``Point{Float64}``,
-``Point{AbstractString}``, etc.:
+``Point`` itself is also a valid type object, containing all instances
+``Point{Float64}``, ``Point{AbstractString}``, etc. as subtypes:
 
 .. doctest::
 
@@ -1118,6 +1110,51 @@ of the umbrella ``Ptr`` type:
     julia> Ptr{Int64} <: Ptr
     true
 
+UnionAll Types
+--------------
+
+We have said that a parametric type like ``Ptr`` acts as a supertype of
+all its instances (``Ptr{Int64}`` etc.). How does this work?
+``Ptr`` itself cannot be a normal data type, since without knowing the
+type of the referenced data the type clearly cannot be used for memory
+operations.
+The answer is that ``Ptr`` (or other parametric type like ``Array``)
+is a different kind of type called a ``UnionAll`` type.
+Such a type expresses the *iterated union* of types for all values of
+some variable.
+
+``UnionAll`` types are usually written using the keyword ``where``.
+For example ``Ptr`` could be more accurately written as ``Ptr{T} where T``,
+meaning all values whose type is ``Ptr{T}`` for some value of ``T``.
+Each ``where`` introduces a single variable, so these expressions are nested
+for types with multiple parameters, for example ``Array{T,N} where N where T``.
+
+The type application syntax ``A{B,C}`` requires ``A`` to be a ``UnionAll``
+type, and first substitutes ``B`` for the outermost variable in ``A``.
+The result is expected to be another ``UnionAll`` type, into which ``C`` is
+then substituted.
+So ``A{B,C}`` is equivalent to ``A{B}{C}``.
+This explains why it is possible to partially instantiate a type, as in
+``Array{Float64}``: the first parameter value has been fixed, but the second
+still ranges over all possible values.
+Using explicit ``where`` syntax, any subset of parameters can be fixed.
+For example, the type of all 1-dimensional arrays can be written as
+``Array{T,1} where T``.
+
+Variables in ``where`` expressions can be restricted.
+``Array{T} where T<:Integer`` refers to all arrays whose element type is
+some kind of ``Integer``.
+Variables can have both lower and upper bounds.
+``Array{T} where Int<:T<:Number`` refers to all arrays of ``Number``\ s that
+are able to contain ``Int``\ s (since ``T`` must be at least as big as ``Int``).
+The syntax ``T>:Int`` also works to specify only the lower bound of a variable.
+
+Since ``where`` expressions nest, variable bounds can refer to outer variables.
+For example ``Tuple{T,Array{S}} where S<:AbstractArray{T} where T<:Real`` refers to
+2-tuples whose first element is some ``Real``, and whose second element is an
+``Array`` of any kind of array whose element type contains the type of the first
+tuple element.
+
 Type Aliases
 ------------
 
@@ -1146,21 +1183,7 @@ Of course, this depends on what :class:`Int` is aliased to — but that is
 predefined to be the correct type — either :class:`Int32` or :class:`Int64`.
 
 For parametric types, ``typealias`` can be convenient for providing
-names for cases where some of the parameter choices are fixed.
-Julia's arrays have type ``Array{T,N}`` where ``T`` is the element type
-and ``N`` is the number of array dimensions. For convenience, writing
-``Array{Float64}`` allows one to specify the element type without
-specifying the dimension:
-
-.. doctest::
-
-    julia> Array{Float64,1} <: Array{Float64} <: Array
-    true
-
-However, there is no way to equally simply restrict just the dimension
-but not the element type. Yet, one often needs to ensure an object
-is a vector or a matrix (imposing restrictions on the number of dimensions).
-For that reason, the following type aliases are provided::
+names for cases where some of the parameter choices are fixed::
 
     typealias Vector{T} Array{T,1}
     typealias Matrix{T} Array{T,2}
@@ -1173,17 +1196,6 @@ where parametric types must always be specified in full, this is not
 especially helpful, but in Julia, this allows one to write just
 ``Matrix`` for the abstract type including all two-dimensional dense
 arrays of any element type.
-
-This declaration of ``Vector`` creates a subtype relation
-``Vector{Int} <: Vector``.  However, it is not always the case that a parametric
-``typealias`` statement creates such a relation; for example, the statement::
-
-    typealias AA{T} Array{Array{T,1},1}
-
-does not create the relation ``AA{Int} <: AA``.  The reason is that ``Array{Array{T,1},1}`` is not
-an abstract type at all; in fact, it is a concrete type describing a
-1-dimensional array in which each entry
-is an object of type ``Array{T,1}`` for some value of ``T``.
 
 Operations on Types
 -------------------
@@ -1211,7 +1223,7 @@ objects, they also have types, and we can ask what their types are:
 
 .. doctest::
 
-    julia> typeof(Rational)
+    julia> typeof(Rational{Int})
     DataType
 
     julia> typeof(Union{Real,Float64,Rational})

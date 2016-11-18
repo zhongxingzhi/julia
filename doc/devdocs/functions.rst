@@ -114,7 +114,7 @@ One wrinkle is the fallback definition that makes all types callable via ``conve
     (::Type{T}){T}(args...) = convert(T, args...)::T
 
 In this definition the function type is abstract, which is not normally supported.
-To make this work, all subtypes of ``Type`` (``Type``, ``TypeConstructor``, ``Union``, and
+To make this work, all subtypes of ``Type`` (``Type``, ``UnionAll``, ``Union``, and
 ``DataType``) currently share a method table via special arrangement.
 
 

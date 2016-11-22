@@ -2193,6 +2193,7 @@ void jl_init_types(void)
     jl_svecset(jl_datatype_type->types, 15, jl_bool_type);
     jl_svecset(jl_simplevector_type->types, 0, jl_long_type);
     jl_svecset(jl_typename_type->types, 6, jl_long_type);
+    jl_svecset(jl_typename_type->types, 3, jl_type_type);
     jl_svecset(jl_methtable_type->types, 3, jl_long_type);
 #ifdef __LP64__
     jl_svecset(jl_methtable_type->types, 6, jl_int64_type); // unsigned long

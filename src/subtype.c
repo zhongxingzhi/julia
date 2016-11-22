@@ -819,6 +819,8 @@ JL_DLLEXPORT int jl_subtype_env_size(jl_value_t *t)
 JL_DLLEXPORT int jl_subtype_env(jl_value_t *x, jl_value_t *y, jl_value_t **env, int envsz)
 {
     jl_stenv_t e;
+    if (envsz == 0 && (y == (jl_value_t*)jl_any_type || x == jl_bottom_type || x == y))
+        return 1;
     init_stenv(&e, env, envsz);
     return forall_exists_subtype(x, y, &e, 0);
 }
@@ -837,8 +839,6 @@ static int subtype_in_env(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
 
 JL_DLLEXPORT int jl_subtype(jl_value_t *x, jl_value_t *y)
 {
-    if (y == (jl_value_t*)jl_any_type || x == jl_bottom_type || x == y)
-        return 1;
     return jl_subtype_env(x, y, NULL, 0);
 }
 
@@ -851,7 +851,16 @@ JL_DLLEXPORT int jl_types_equal(jl_value_t *a, jl_value_t *b)
 
 int jl_tuple_isa(jl_value_t **child, size_t cl, jl_datatype_t *pdt)
 {
-    // TODO jb/subtype avoid allocation
+    if (jl_is_tuple_type(pdt) && !jl_is_va_tuple(pdt)) {
+        if (cl != jl_nparams(pdt))
+            return 0;
+        size_t i;
+        for(i=0; i < cl; i++) {
+            if (!jl_isa(child[i], jl_tparam(pdt,i)))
+                return 0;
+        }
+        return 1;
+    }
     jl_value_t *tu = (jl_value_t*)arg_type_tuple(child, cl);
     int ans;
     JL_GC_PUSH1(&tu);
@@ -872,6 +881,20 @@ JL_DLLEXPORT int jl_isa(jl_value_t *x, jl_value_t *t)
                 if (jl_is_type_type(t))
                     return jl_types_equal(x, jl_tparam0(t));
                 return 0;
+            }
+            jl_value_t *t2 = jl_unwrap_unionall(t);
+            if (jl_is_datatype(t2)) {
+                if (((jl_datatype_t*)t2)->name == jl_type_typename) {
+                    jl_value_t *tp = jl_tparam0(t2);
+                    if (jl_is_typevar(tp)) {
+                        while (jl_is_typevar(tp))
+                            tp = ((jl_tvar_t*)tp)->ub;
+                        return jl_subtype(x, tp);
+                    }
+                }
+                else {
+                    return 0;
+                }
             }
             JL_GC_PUSH1(&x);
             x = (jl_value_t*)jl_wrap_Type(x);  // TODO jb/subtype avoid jl_wrap_Type

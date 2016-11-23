@@ -1282,7 +1282,7 @@ function abstract_eval(e::ANY, vtypes::VarTable, sv::InferenceState)
                 # if the tvar does not refer to anything more specific than Any,
                 # the static param might actually be an integer, symbol, etc.
                 if !(Any <: val.ub)
-                    t = Type{val}
+                    t = UnionAll(val, Type{val})
                 end
             else
                 t = abstract_eval_constant(val)

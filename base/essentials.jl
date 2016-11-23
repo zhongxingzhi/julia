@@ -91,8 +91,8 @@ end
 
 isvatuple(t::DataType) = (n = length(t.parameters); n > 0 && isvarargtype(t.parameters[n]))
 function unwrapva(t::ANY)
-    t = unwrap_unionall(t)
-    isvarargtype(t) ? t.parameters[1] : t
+    t2 = unwrap_unionall(t)
+    isvarargtype(t2) ? t2.parameters[1] : t
 end
 
 convert{T<:Tuple{Any,Vararg{Any}}}(::Type{T}, x::Tuple{Any, Vararg{Any}}) =

@@ -464,6 +464,18 @@ Constructors
 
    Fill array ``A`` with the value ``x``\ . If ``x`` is an object reference, all elements will refer to the same object. ``fill!(A, Foo())`` will return ``A`` filled with the result of evaluating ``Foo()`` once.
 
+   .. doctest::
+
+       julia> A = zeros(2,3)
+       2×3 Array{Float64,2}:
+        0.0  0.0  0.0
+        0.0  0.0  0.0
+
+       julia> fill!(A, 2.)
+       2×3 Array{Float64,2}:
+        2.0  2.0  2.0
+        2.0  2.0  2.0
+
 .. function:: reshape(A, dims)
 
    .. Docstring generated from Julia source

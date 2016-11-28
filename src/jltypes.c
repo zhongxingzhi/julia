@@ -609,7 +609,7 @@ static int valid_type_param(jl_value_t *v)
 static int within_typevar(jl_value_t *t, jl_value_t *vlb, jl_value_t *vub)
 {
     jl_value_t *lb = t, *ub = t;
-    if (jl_is_typevar(t)) {
+    if (jl_is_typevar(t) || jl_has_free_typevars(t)) {
         // TODO: automatically restrict typevars in method definitions based on
         // types they are used in.
         return 1;
@@ -1598,10 +1598,8 @@ static int type_morespecific_(jl_value_t *a, jl_value_t *b, int invariant, jl_ty
         jl_value_t *tp0a = jl_tparam0(a);
         if (jl_is_typevar(tp0a)) {
             jl_value_t *ub = ((jl_tvar_t*)tp0a)->ub;
-            if (jl_isa(ub, b) &&
-                !jl_subtype((jl_value_t*)jl_any_type, ub)) {
+            if (is_kind(b) && !jl_subtype((jl_value_t*)jl_any_type, ub))
                 return 1;
-            }
         }
         else {
             if (jl_isa(tp0a, b))

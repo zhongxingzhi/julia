@@ -332,6 +332,13 @@ function test_5()
     @test !issub(Ref{Union{Ref{Int},Ref{Int8}}}, @UnionAll T Ref{Ref{T}})
     @test  issub(Tuple{Union{Ref{Int},Ref{Int8}}}, @UnionAll T Tuple{Ref{T}})
     @test !issub(Ref{Union{Ref{Int},Ref{Int8}}}, Union{Ref{Ref{Int}}, Ref{Ref{Int8}}})
+
+    @test isequal_type(Ref{Tuple{Union{Int,Int8},Int16}}, Ref{Union{Tuple{Int,Int16},Tuple{Int8,Int16}}})
+    @test isequal_type(Ref{T} where T<:Tuple{Union{Int,Int8},Int16},
+                       Ref{T} where T<:Union{Tuple{Int,Int16},Tuple{Int8,Int16}})
+
+    @test_broken isequal_type(Ref{Tuple{Union{Int,Int8},Int16,T}} where T,
+                              Ref{Union{Tuple{Int,Int16,S},Tuple{Int8,Int16,S}}} where S)
 end
 
 # tricky type variable lower bounds
@@ -765,6 +772,16 @@ function test_intersection()
 
     @testintersect(DataType, Type, DataType)
     @testintersect(DataType, Type{T} where T<:Integer, Type{T} where T<:Integer)
+
+    @testintersect((Type{Tuple{Vararg{T}}} where T), Type{Tuple}, Bottom)
+    @testintersect(Tuple{Type{S}, Tuple{Any, Vararg{Any}}} where S<:Tuple{Any, Vararg{Any}},
+                   Tuple{Type{T}, T} where T,
+                   Tuple{Type{S},S} where S<:Tuple{Any,Vararg{Any,N} where N})
+
+    @test_broken isequal_type(_type_intersect(Tuple{T,T} where T,
+                                              Union{Tuple{S,Array{Int64,1}},Tuple{S,Array{S,1}}} where S),
+                              Union{Tuple{Vector{Int64},Vector{Int64}},
+                                    Tuple{Vector{T},Vector{T}} where T>:Vector})
 end
 
 function test_intersection_properties()

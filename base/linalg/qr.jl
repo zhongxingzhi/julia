@@ -254,6 +254,7 @@ end
 convert{T}(::Type{QR{T}}, A::QR) = QR(convert(AbstractMatrix{T}, A.factors), convert(Vector{T}, A.τ))
 convert{T}(::Type{Factorization{T}}, A::QR) = convert(QR{T}, A)
 convert{T}(::Type{QRCompactWY{T}}, A::QRCompactWY) = QRCompactWY(convert(AbstractMatrix{T}, A.factors), convert(AbstractMatrix{T}, A.T))
+convert{T}(::Type{Factorization{T}}, A::QRCompactWY{T}) = A
 convert{T}(::Type{Factorization{T}}, A::QRCompactWY) = convert(QRCompactWY{T}, A)
 convert(::Type{AbstractMatrix}, F::Union{QR,QRCompactWY}) = F[:Q] * F[:R]
 convert(::Type{AbstractArray}, F::Union{QR,QRCompactWY}) = convert(AbstractMatrix, F)
@@ -330,6 +331,7 @@ QRCompactWYQ{S}(factors::AbstractMatrix{S}, T::Matrix{S}) = QRCompactWYQ{S,typeo
 convert{T}(::Type{QRPackedQ{T}}, Q::QRPackedQ) = QRPackedQ(convert(AbstractMatrix{T}, Q.factors), convert(Vector{T}, Q.τ))
 convert{T}(::Type{AbstractMatrix{T}}, Q::QRPackedQ) = convert(QRPackedQ{T}, Q)
 convert{S}(::Type{QRCompactWYQ{S}}, Q::QRCompactWYQ) = QRCompactWYQ(convert(AbstractMatrix{S}, Q.factors), convert(AbstractMatrix{S}, Q.T))
+convert{S}(::Type{AbstractMatrix{S}}, Q::QRCompactWYQ{S}) = Q
 convert{S}(::Type{AbstractMatrix{S}}, Q::QRCompactWYQ) = convert(QRCompactWYQ{S}, Q)
 convert{T}(::Type{Matrix}, A::Union{QRPackedQ{T},QRCompactWYQ{T}}) = A_mul_B!(A, eye(T, size(A.factors, 1), minimum(size(A.factors))))
 convert(::Type{Array}, A::Union{QRPackedQ,QRCompactWYQ}) = convert(Matrix, A)

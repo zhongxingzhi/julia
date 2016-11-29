@@ -34,46 +34,35 @@ const utf8_trailing = [
 ## required core functionality ##
 
 function endof(s::String)
-    d = s.data
-    i = length(d)
-    @inbounds while i > 0 && is_valid_continuation(d[i])
+    p = pointer(s)
+    i = s.len
+    while i > 0 && is_valid_continuation(unsafe_load(p,i))
         i -= 1
     end
     i
 end
 
 function length(s::String)
-    d = s.data
+    p = pointer(s)
     cnum = 0
-    for i = 1:length(d)
-        @inbounds cnum += !is_valid_continuation(d[i])
+    for i = 1:s.len
+        cnum += !is_valid_continuation(unsafe_load(p,i))
     end
     cnum
 end
 
-@noinline function slow_utf8_next(d::Vector{UInt8}, b::UInt8, i::Int)
-    # potentially faster version
-    # d = s.data
-    # a::UInt32 = d[i]
-    # if a < 0x80; return Char(a); end
-    # #if a&0xc0==0x80; return '\ufffd'; end
-    # b::UInt32 = a<<6 + d[i+1]
-    # if a < 0xe0; return Char(b - 0x00003080); end
-    # c::UInt32 = b<<6 + d[i+2]
-    # if a < 0xf0; return Char(c - 0x000e2080); end
-    # return Char(c<<6 + d[i+3] - 0x03c82080)
-
+@noinline function slow_utf8_next(p::Ptr{UInt8}, b::UInt8, i::Int, l::Int)
     if is_valid_continuation(b)
-        throw(UnicodeError(UTF_ERR_INVALID_INDEX, i, d[i]))
+        throw(UnicodeError(UTF_ERR_INVALID_INDEX, i, unsafe_load(p,i)))
     end
     trailing = utf8_trailing[b + 1]
-    if length(d) < i + trailing
+    if l < i + trailing
         return '\ufffd', i+1
     end
     c::UInt32 = 0
     for j = 1:(trailing + 1)
         c <<= 6
-        c += d[i]
+        c += unsafe_load(p,i)
         i += 1
     end
     c -= utf8_offset[trailing + 1]
@@ -84,12 +73,15 @@ end
     # function is split into this critical fast-path
     # for pure ascii data, such as parsing numbers,
     # and a longer function that can handle any utf8 data
-    d = s.data
-    b = d[i]
+    if i < 1 || i > s.len
+        throw(BoundsError(s,i))
+    end
+    p = pointer(s)
+    b = unsafe_load(p, i)
     if b < 0x80
         return Char(b), i + 1
     end
-    return slow_utf8_next(d, b, i)
+    return slow_utf8_next(p, b, i, s.len)
 end
 
 function first_utf8_byte(ch::Char)
@@ -102,9 +94,9 @@ function first_utf8_byte(ch::Char)
 end
 
 function reverseind(s::String, i::Integer)
-    j = length(s.data) + 1 - i
-    d = s.data
-    while is_valid_continuation(d[j])
+    j = s.len + 1 - i
+    p = pointer(s)
+    while is_valid_continuation(unsafe_load(p,j))
         j -= 1
     end
     return j
@@ -112,10 +104,10 @@ end
 
 ## overload methods for efficiency ##
 
-sizeof(s::String) = sizeof(s.data)
+sizeof(s::String) = s.len
 
 isvalid(s::String, i::Integer) =
-    (1 <= i <= endof(s.data)) && !is_valid_continuation(s.data[i])
+    (1 <= i <= s.len) && !is_valid_continuation(unsafe_load(pointer(s),i))
 
 const empty_utf8 = String(UInt8[])
 
@@ -237,10 +229,10 @@ function reverse(s::String)
     String(buf)
 end
 
-write(io::IO, s::String) = write(io, s.data)
+write(io::IO, s::String) = write(io, pointer(s), s.len)
 
-pointer(x::String) = pointer(x.data)
-pointer(x::String, i::Integer) = pointer(x.data)+(i-1)
+pointer(s::String) = convert(Ptr{UInt8}, pointer_from_objref(s)+sizeof(Int))
+pointer(x::String, i::Integer) = pointer(x)+(i-1)
 
 convert(::Type{String}, s::String) = s
 convert(::Type{String}, v::Vector{UInt8}) = String(v)

@@ -756,8 +756,8 @@ STATIC_INLINE void jl_array_uint8_set(void *a, size_t i, uint8_t x)
 #define jl_data_ptr(v)  ((jl_value_t**)v)
 
 #define jl_array_ptr_data(a)   ((jl_value_t**)((jl_array_t*)a)->data)
-#define jl_string_data(s) ((char*)((jl_array_t*)jl_data_ptr(s)[0])->data)
-#define jl_string_len(s)  (jl_array_len((jl_array_t*)(jl_data_ptr(s)[0])))
+#define jl_string_data(s) ((char*)s + sizeof(void*))
+#define jl_string_len(s)  (*(size_t*)s)
 #define jl_iostr_data(s)  ((char*)((jl_array_t*)jl_data_ptr(s)[0])->data)
 
 #define jl_gf_mtable(f) (((jl_datatype_t*)jl_typeof(f))->name->mt)

@@ -221,10 +221,10 @@ end
 
 abstract DirectIndexString <: AbstractString
 
-immutable String <: AbstractString
-    data::Array{UInt8,1}
-    # required to make String("foo") work (#15120):
-    String(d::Array{UInt8,1}) = new(d)
+type String <: AbstractString
+    len::Int
+    String(p::Ptr{UInt8}, len::Int) =
+        ccall(:jl_pchar_to_string, Ref{String}, (Ptr{UInt8}, Int), p, len)
 end
 
 # This should always be inlined

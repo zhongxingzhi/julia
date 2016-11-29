@@ -57,8 +57,8 @@ function unsafe_string(p::Union{Ptr{UInt8},Ptr{Int8}})
     ccall(:jl_cstr_to_string, Ref{String}, (Ptr{UInt8},), p)
 end
 
-convert(::Type{Vector{UInt8}}, s::AbstractString) = String(s).data
-convert(::Type{Array{UInt8}}, s::AbstractString) = String(s).data
+#convert(::Type{Vector{UInt8}}, s::AbstractString) = String(s).data
+#convert(::Type{Array{UInt8}}, s::AbstractString) = String(s).data
 convert(::Type{String}, s::AbstractString) = String(s)
 convert(::Type{Vector{Char}}, s::AbstractString) = collect(s)
 convert(::Type{Symbol}, s::AbstractString) = Symbol(s)

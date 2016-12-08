@@ -1,4 +1,5 @@
 importall Base.Dates
+import Base.Dates: VALUETODAYOFWEEKABBR, VALUETODAYOFWEEK
 
 
 """
@@ -106,12 +107,10 @@ end
 end
 
 function month_from_abbr_name{l}(word, locale::DateLocale{l})
-    @show l, word
     get(Dates.MONTHTOVALUEABBR[string(l)], word, 0)
 end
 
 function month_from_name{l}(word, locale::DateLocale{l})
-    @show l, word
     get(Dates.MONTHTOVALUE[string(l)], word, 0)
 end
 
@@ -147,7 +146,7 @@ end
 
 for (tok, dict) in zip("eE", [:VALUETODAYOFWEEKABBR, :VALUETODAYOFWEEK])
     @eval function format{l}(io, d::DatePart{$tok}, dt, locale::DateLocale{l})
-        write(io, $dict[string(locale)][dayofweek(dt)])
+        write(io, $dict[string(l)][dayofweek(dt)])
     end
 end
 
@@ -254,6 +253,7 @@ function DateFormat{T}(f::AbstractString, locale=:english, ::Type{T}=DateTime; d
     end
 
     remaining = f[last_offset:end]
+    remaining = replace(remaining, r"\\(.)", s"\1")
     push_delim_token!(tokens, remaining)
     if length(tokens) > 0
         tokens[end] = make_variable_width(tokens[end])
@@ -278,12 +278,17 @@ end
         R = Nullable{DateTime}
         t = fmt.tokens
         l = fmt.locale
+        len = endof(str)
 
         state = start(str)
-        Base.@nexprs $N i->((val_i, state) = (@chk1 tryparsenext(t[i], str, state, l)))
-        parts = Base.@ntuple $N val
+        Base.@nexprs $N i->val_i = 0
+        Base.@nexprs $N i->((val_i, state) = begin
+            state > len && @goto done
+            @chk1 tryparsenext(t[i], str, state, l)
+        end)
 
         @label done
+        parts = Base.@ntuple $N val
         return R(DateTime((reorder_args(parts, fmt.field_order, fmt.field_defaults)::NTuple{7,Int})))
 
         @label error
@@ -389,7 +394,7 @@ function push_delim_token!(tokens, delim)
 end
 
 ### Common formats
-const ISODateTimeFormat = DateFormat("yyyy-mm-dd\\THH:MM:SS.s")
+const ISODateTimeFormat = DateFormat("yyyy-mm-ddTHH:MM:SS.s")
 const ISODateFormat = DateFormat("yyyy-mm-dd")
 const RFC1123Format = DateFormat("e, dd u yyyy HH:MM:SS")
 
@@ -517,10 +522,10 @@ function Date{T<:AbstractString}(Y::AbstractArray{T},df::DateFormat=ISODateForma
     return reshape(Date[Date(tryfailparse(y,df)) for y in Y], size(Y))
 end
 
-format{T<:TimeType}(Y::AbstractArray{T},format::AbstractString;locale::AbstractString="english") = Dates.format(Y,DateFormat(format,locale))
+format{T<:TimeType}(Y::AbstractArray{T},fmt::AbstractString;locale::AbstractString="english") = format(Y,DateFormat(fmt,locale))
 function format(Y::AbstractArray{Date},df::DateFormat=ISODateFormat)
-    return reshape([Dates.format(y,df) for y in Y], size(Y))
+    return reshape([format(y,df) for y in Y], size(Y))
 end
 function format(Y::AbstractArray{DateTime},df::DateFormat=ISODateTimeFormat)
-    return reshape([Dates.format(y,df) for y in Y], size(Y))
+    return reshape([format(y,df) for y in Y], size(Y))
 end

@@ -63,24 +63,24 @@ immutable DatePart{c, n, fixedwidth} <: AbstractDateToken end
 for c in "yYmdHMS"
     @eval begin
         # in the case where the token is not to be treated fixed width
-        @inline function tryparsenext{N}(::DatePart{$c, N, false}, str, i)
-            tryparsenext_base10(str,i,20)
+        @inline function tryparsenext{N}(::DatePart{$c, N, false}, str, i, len)
+            tryparsenext_base10(str,i,len,20)
         end
 
         # parse upto a maximum of N numeric characters
         # (will be chosen in case of yyyymmdd for example)
-        @inline function tryparsenext{N}(::DatePart{$c, N, true}, str, i)
-            tryparsenext_base10(str,i,N)
+        @inline function tryparsenext{N}(::DatePart{$c, N, true}, str, i, len)
+            tryparsenext_base10(str,i,len,N)
         end
     end
 end
 
-@inline function tryparsenext{N}(::DatePart{'s', N, false}, str, i)
-    tryparsenext_base10_frac(str,i,3)
+@inline function tryparsenext{N}(::DatePart{'s', N, false}, str, i, len)
+    tryparsenext_base10_frac(str,i,len,3)
 end
 
-@inline function tryparsenext{N}(::DatePart{'s', N, true}, str, i)
-    tryparsenext_base10_frac(str,i,N)
+@inline function tryparsenext{N}(::DatePart{'s', N, true}, str, i, len)
+    tryparsenext_base10_frac(str,i,len,N)
 end
 
 for (c, fn) in zip("YmdHMSs", [year, month, day, hour, minute, second, millisecond])
@@ -102,8 +102,8 @@ end
 ### Text tokens
 
 # fallback to tryparsenext methods that don't care about locale
-@inline function tryparsenext(d::AbstractDateToken, str, i, locale)
-    tryparsenext(d, str, i)
+@inline function tryparsenext(d::AbstractDateToken, str, i, len, locale)
+    tryparsenext(d, str, i, len)
 end
 
 function month_from_abbr_name{l}(word, locale::DateLocale{l})
@@ -124,9 +124,9 @@ end
 
 for (tok, fn) in zip("uU", [month_from_abbr_name, month_from_name]),
     (fixed, nchars) in zip([false, true], [typemax(Int), :N])
-    @eval @inline function tryparsenext{N}(d::DatePart{$tok,N,$fixed}, str, i, locale)
+    @eval @inline function tryparsenext{N}(d::DatePart{$tok,N,$fixed}, str, i, len, locale)
         R = Nullable{Int}
-        c, ii = tryparsenext_word(str, i, locale, $nchars)
+        c, ii = tryparsenext_word(str, i, len, locale, $nchars)
         word = str[i:ii-1]
         x = $fn(lowercase(word), locale)
         ((x == 0 ? R() : R(x)), ii)
@@ -134,8 +134,8 @@ for (tok, fn) in zip("uU", [month_from_abbr_name, month_from_name]),
 end
 
 # ignore day of week while parsing
-@inline function tryparsenext(d::Union{DatePart{'e'}, DatePart{'E'}}, str, i, locale)
-    tryparsenext_word(str, i, locale)
+@inline function tryparsenext(d::Union{DatePart{'e'}, DatePart{'E'}}, str, i, len, locale)
+    tryparsenext_word(str, i, len, locale)
 end
 
 for (tok, fn) in zip("uU", [monthabbr, monthname])
@@ -151,9 +151,9 @@ for (tok, dict) in zip("eE", [:VALUETODAYOFWEEKABBR, :VALUETODAYOFWEEK])
 end
 
 # fast version for English
-@inline function tryparsenext_word(str, i, locale::DateLocale{:english}, maxchars=typemax(Int))
+@inline function tryparsenext_word(str, i, len, locale::DateLocale{:english}, maxchars=typemax(Int))
     for j=1:maxchars
-        done(str, i) && break
+        i > len && break
         c, ii = next(str, i)
         !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) && break
         i=ii
@@ -161,9 +161,9 @@ end
     return Nullable{Int}(0), i
 end
 
-@inline function tryparsenext_word(str, i, locale, maxchars=typemax(Int))
+@inline function tryparsenext_word(str, i, len, locale, maxchars=typemax(Int))
     for j=1:maxchars
-        done(str, i) && break
+        i > len && break
         c, ii = next(str, i)
         !isalpha(c) && break
         i=ii
@@ -194,22 +194,22 @@ immutable Delim{T, length} <: AbstractDateToken d::T end
 Delim(c::Char, n) = Delim{Char, n}(c)
 Delim(c::Char) = Delim(c,1)
 
-@inline function tryparsenext{N}(d::Delim{Char,N}, str, i::Int)
+@inline function tryparsenext{N}(d::Delim{Char,N}, str, i::Int, len)
     R = Nullable{Int}
     for j=1:N
-        done(str, i) && return (R(), i)
+        i > len && return (R(), i)
         c, i = next(str, i)
         c != d.d && return (R(), i)
     end
     return R(0), i
 end
 
-@inline function tryparsenext{N}(d::Delim{String,N}, str, i::Int)
+@inline function tryparsenext{N}(d::Delim{String,N}, str, i::Int, len)
     R = Nullable{Int}
     i1=i
     i2=start(d.d)
     for j=1:N
-        if done(str, i1)
+        if i1 > len
             return R(), i1
         end
         c1, i1 = next(str, i1)
@@ -273,26 +273,38 @@ macro chk1(expr,label=:error)
     end
 end
 
-@generated function Base.tryparse{N}(fmt::DateFormat{DateTime, NTuple{N}}, str::AbstractString)
+@generated function _tryparse{N}(fmt::DateFormat{DateTime, NTuple{N}}, str::AbstractString)
     quote
-        R = Nullable{DateTime}
+        R = Nullable{NTuple{7,Int}}
         t = fmt.tokens
         l = fmt.locale
         len = endof(str)
 
         state = start(str)
+        err_idx = 1
         Base.@nexprs $N i->val_i = 0
-        Base.@nexprs $N i->((val_i, state) = begin
+        Base.@nexprs $N i->(begin
             state > len && @goto done
-            @chk1 tryparsenext(t[i], str, state, l)
+            (val_i, state) = @chk1 tryparsenext(t[i], str, state, len, l)
+            err_idx += 1
         end)
 
         @label done
         parts = Base.@ntuple $N val
-        return R(DateTime((reorder_args(parts, fmt.field_order, fmt.field_defaults)::NTuple{7,Int})))
+        return R(reorder_args(parts, fmt.field_order, fmt.field_defaults)::NTuple{7,Int})
 
         @label error
-        return R()
+        return R((0,0,0,0,0,state,err_idx))
+    end
+end
+
+function Base.tryparse(df::DateFormat, dt::AbstractString)
+    R = Nullable{DateTime}
+    tup = _tryparse(df, dt)
+    if isnull(tup)
+        R()
+    else
+        R(DateTime(get(tup)))
     end
 end
 
@@ -319,9 +331,9 @@ function reorder_args{Nv, Ni}(val::NTuple{Nv}, idx::NTuple{Ni}, default::NTuple{
     end
 end
 
-@inline function tryparsenext_base10_digit(str,i)
+@inline function tryparsenext_base10_digit(str,i, len)
     R = Nullable{Int}
-    done(str,i) && @goto error
+    i > len && @goto error
     c,ii = next(str,i)
     '0' <= c <= '9' || @goto error
     return R(c-'0'), ii
@@ -330,11 +342,11 @@ end
     return R(), i
 end
 
-@inline function tryparsenext_base10(str,i,maxdig)
+@inline function tryparsenext_base10(str,i,len, maxdig)
     R = Nullable{Int}
-    r,i = @chk1 tryparsenext_base10_digit(str,i)
+    r,i = @chk1 tryparsenext_base10_digit(str,i, len)
     for j = 2:maxdig
-        d,i = @chk1 tryparsenext_base10_digit(str,i) done
+        d,i = @chk1 tryparsenext_base10_digit(str,i,len) done
         r = r*10 + d
     end
     @label done
@@ -344,11 +356,11 @@ end
     return R(), i
 end
 
-@inline function tryparsenext_base10_frac(str,i,maxdig)
+@inline function tryparsenext_base10_frac(str,i,len,maxdig)
     R = Nullable{Int}
-    r,i = @chk1 tryparsenext_base10_digit(str,i)
+    r,i = @chk1 tryparsenext_base10_digit(str,i,len)
     for j = 2:maxdig
-        nd,i = tryparsenext_base10_digit(str,i)
+        nd,i = tryparsenext_base10_digit(str,i,len)
         if isnull(nd)
             for k = j:maxdig
                 r *= 10
@@ -364,9 +376,9 @@ end
     return R(), i
 end
 
-@inline function tryparsenext_char(str,i,cc::Char)::Tuple{Nullable{Char},Int}
+@inline function tryparsenext_char(str,i,len,cc::Char)::Tuple{Nullable{Char},Int}
     R = Nullable{Char}
-    done(str,i) && @goto error
+    i > len && @goto error
     c,ii = next(str,i)
     c == cc || @goto error
     return R(c), ii
@@ -429,11 +441,15 @@ backslash. The date "1995y01m" would have the format "y\\ym\\m".
 DateTime(dt::AbstractString, format::AbstractString;locale::AbstractString="english") = DateTime(dt,DateFormat(format,locale))
 
 function tryfailparse(dt, df)
-    maybedt = tryparse(df, dt)
+    maybedt = _tryparse(df, dt)
     if isnull(maybedt)
-        throw(ArgumentError("Invalid date string for given format"))
+        err_data = get(maybedt)
+        state = err_data[end-1]
+        err_idx = err_data[end]
+        # TODO: pretty print this output
+        throw(ArgumentError("Unable to parse date string. At token $(df.tokens[err_idx]) at char $(state)"))
     else
-        get(maybedt)
+        DateTime(get(maybedt))
     end
 end
 

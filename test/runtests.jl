@@ -47,13 +47,13 @@ cd(dirname(@__FILE__)) do
 
     #pretty print the information about gc and mem usage
     name_align    = max(length("Test (Worker):"), maximum(map(x -> length(x) + 3 + ndigits(nworkers()), tests)))
-    elapsed_align = length("Total time (s):")
-    gc_align      = length("GC time (s):")
-    percent_align = length("Percent in gc:")
-    alloc_align   = length("Allocated (MB):")
+    elapsed_align = length("Time (s):")
+    gc_align      = length("GC (s):")
+    percent_align = length("GS %:")
+    alloc_align   = length("Alloc (MB):")
     rss_align     = length("RSS (MB):")
     print_with_color(:white, rpad("Test (Worker):",name_align," "), " | ")
-    print_with_color(:white, "Total time (s): | GC time (s): | Percent in gc: | Allocated (MB): | RSS (MB):\n")
+    print_with_color(:white, "Time (s): | GC (s): | GC %: | Alloc (MB): | RSS (MB):\n")
     results=[]
     @sync begin
         for p in workers()
@@ -72,11 +72,11 @@ cd(dirname(@__FILE__)) do
                     print_with_color(:white, rpad(time_str,elapsed_align," "), " | ")
                     gc_str = @sprintf("%7.2f",resp[5].total_time/10^9)
                     print_with_color(:white, rpad(gc_str,gc_align," "), " | ")
-                    percent_str = @sprintf("%7.2f",100*resp[5].total_time/(10^9*resp[2]))
+                    percent_str = @sprintf("%5.2f",100*resp[5].total_time/(10^9*resp[2]))
                     print_with_color(:white, rpad(percent_str,percent_align," "), " | ")
-                    alloc_str = @sprintf("%7.2f",resp[3]/2^20)
+                    alloc_str = @sprintf("%5.2f",resp[3]/2^20)
                     print_with_color(:white, rpad(alloc_str,alloc_align," "), " | ")
-                    rss_str = @sprintf("%7.2f",resp[6]/2^20)
+                    rss_str = @sprintf("%5.2f",resp[6]/2^20)
                     print_with_color(:white, rpad(rss_str,rss_align," "), "\n")
 
                     if (isa(resp[end], Integer) && (resp[end] > max_worker_rss)) || isa(resp, Exception)

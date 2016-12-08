@@ -261,7 +261,7 @@ julia> eye(A)
  0  0  1
 ```
 
-Note the difference from [`ones`](:func:`ones`).
+Note the difference from [`ones`](@ref).
 """
 eye{T}(x::AbstractMatrix{T}) = eye(T, size(x, 1), size(x, 2))
 
@@ -981,6 +981,8 @@ function vcat{T}(arrays::Vector{T}...)
     end
     return arr
 end
+
+cat(n::Integer, x::Integer...) = reshape([x...], (ntuple(x->1, n-1)..., length(x)))
 
 
 ## find ##

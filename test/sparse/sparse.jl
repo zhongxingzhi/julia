@@ -1627,14 +1627,10 @@ let A = sparse(UInt32[1,2,3], UInt32[1,2,3], [1.0,2.0,3.0])
     @test A[1,1:3] == A[1,:] == [1,0,0]
 end
 
-# Check that `broadcast` methods specialized for unary operations over
-# `SparseMatrixCSC`s are called. (Issue #18705.)
-let
-    A = spdiagm(1.0:5.0)
-    @test isa(sin.(A), SparseMatrixCSC) # representative for _unary_nz2z_z2z class
-    @test isa(abs.(A), SparseMatrixCSC) # representative for _unary_nz2nz_z2z class
-    @test isa(exp.(A), Array) # representative for _unary_nz2nz_z2nz class
-end
+# Check that `broadcast` methods specialized for unary operations over `SparseMatrixCSC`s
+# are called. (Issue #18705.) EDIT: #19239 unified broadcast over a single sparse matrix,
+# eliminating the former operation classes.
+@test isa(sin.(spdiagm(1.0:5.0)), SparseMatrixCSC)
 
 # 19225
 let X = sparse([1 -1; -1 1])
@@ -1662,4 +1658,100 @@ let X = sparse([1 -1; -1 1])
         @test Y * 2 == T(sparse([2 -2; -2 2]))
         @test Y / 1 == Y
     end
+end
+
+# 19304
+@inferred hcat(sparse(rand(2,1)), eye(2,2))
+
+# Test that broadcast[!](f, [C::SparseMatrixCSC], A::SparseMatrixCSC, B::SparseMatrixCSC)
+# returns the correct (densely populated) result when f(zero(eltype(A)), zero(eltype(B))) != 0
+let
+    N = 5
+    sparsesqrmat = sprand(N, N, 0.5)
+    sparsesqrmat2 = sprand(N, N, 0.5)
+    sparserowmat = sprand(1, N, 0.5)
+    sparsecolmat = sprand(N, 1, 0.5)
+    sparse1x1matz = spzeros(1, 1)
+    sparse1x1mato = spones(sparse1x1matz)
+    zeroscourge = (x, y) -> x + y + 1
+    # test case where the matrices have the same shape and no singleton dimensions
+    @test broadcast(zeroscourge, sparsesqrmat, sparsesqrmat2) ==
+            broadcast(zeroscourge, Matrix(sparsesqrmat), Matrix(sparsesqrmat2))
+    # test combinations where either or both matrices have one or more singleton dimensions
+    sparsemats = (sparsesqrmat, sparserowmat, sparsecolmat, sparse1x1matz, sparse1x1mato)
+    densemats = map(Matrix, sparsemats)
+    for (sparseA, denseA) in zip(sparsemats, densemats)
+        for (sparseB, denseB) in zip(sparsemats, densemats)
+            @test broadcast(zeroscourge, sparseA, sparseB) ==
+                    broadcast(zeroscourge, denseA, denseB)
+        end
+    end
+end
+
+# Check that `broadcast` methods specialized for unary operations over
+# `SparseMatrixCSC`s determine a reasonable return type. (Issue #18974.)
+@test eltype(sin.(spdiagm(Int64(1):Int64(4)))) == Float64
+
+# Test map/map! over sparse matrices
+let
+    N, M = 10, 12
+    # test map/map! implementation specialized for a single (input) sparse matrix
+    # (also tested through broadcast/broadcast! over a single (input) sparse matrix)
+    # --> test map entry point
+    A = sprand(N, M, 0.4)
+    fA = Array(A)
+    @test map(sin, A) == sparse(map(sin, fA))
+    @test map(cos, A) == sparse(map(cos, fA))
+    # --> test map! entry point
+    fX = copy(fA); X = sparse(fX)
+    map!(sin, X, A); X = sparse(fX) # warmup for @allocated
+    @test (@allocated map!(sin, X, A)) == 0
+    @test map!(sin, X, A) == sparse(map!(sin, fX, fA))
+    @test map!(cos, X, A) == sparse(map!(cos, fX, fA))
+    @test_throws DimensionMismatch map!(sin, X, spzeros(N, M - 1))
+    # test map/map! implementation specialized for a pair of (input) sparse matrices
+    f(x, y) = x + y + 1
+    A = sprand(N, M, 0.3)
+    B = convert(SparseMatrixCSC{Float32,Int32}, sprand(N, M, 0.3))
+    # use different types to check internal type stability via allocation tests below
+    fA, fB = map(Array, (A, B))
+    # --> test map entry point
+    @test map(+, A, B) == sparse(map(+, fA, fB))
+    @test map(*, A, B) == sparse(map(*, fA, fB))
+    @test map(f, A, B) == sparse(map(f, fA, fB))
+    @test_throws DimensionMismatch map(+, A, spzeros(N, M - 1))
+    # --> test map! entry point
+    fX = fA .+ fB; X = sparse(fX)
+    map!(+, X, A, B); X = sparse(fX) # warmup for @allocated
+    @test (@allocated map!(+, X, A, B)) == 0
+    @test map!(+, X, A, B) == sparse(map!(+, fX, fA, fB))
+    fX = fA .* fB; X = sparse(fX)
+    map!(*, X, A, B); X = sparse(fX) # warmup for @allocated
+    @test (@allocated map!(*, X, A, B)) == 0
+    @test map!(*, X, A, B) == sparse(map!(*, fX, fA, fB))
+    @test map!(f, X, A, B) == sparse(map!(f, fX, fA, fB))
+    @test_throws DimensionMismatch map!(f, X, A, spzeros(N, M - 1))
+    # test map/map! implementation for an arbitrary number of (input) sparse matrices
+    f(x, y, z) = x + y + z + 1
+    A = sprand(N, M, 0.2)
+    B = sprand(N, M, 0.2)
+    C = convert(SparseMatrixCSC{Float32,Int32}, sprand(N, M, 0.2))
+    # use different types to check internal type stability via allocation tests below
+    fA, fB, fC = map(Array, (A, B, C))
+    # --> test map entry point
+    @test map(+, A, B, C) == sparse(map(+, fA, fB, fC))
+    @test map(*, A, B, C) == sparse(map(*, fA, fB, fC))
+    @test map(f, A, B, C) == sparse(map(f, fA, fB, fC))
+    @test_throws DimensionMismatch map(+, A, B, spzeros(N, M - 1))
+    # --> test map! entry point
+    fX = fA .+ fB .+ fC; X = sparse(fX)
+    map!(+, X, A, B, C); X = sparse(fX) # warmup for @allocated
+    @test (@allocated map!(+, X, A, B, C)) == 0
+    @test map!(+, X, A, B, C) == sparse(map!(+, fX, fA, fB, fC))
+    fX = fA .* fB .* fC; X = sparse(fX)
+    map!(*, X, A, B, C); X = sparse(fX) # warmup for @allocated
+    @test (@allocated map!(*, X, A, B, C)) == 0
+    @test map!(*, X, A, B, C) == sparse(map!(*, fX, fA, fB, fC))
+    @test map!(f, X, A, B, C) == sparse(map!(f, fX, fA, fB, fC))
+    @test_throws DimensionMismatch map!(f, X, A, B, spzeros(N, M - 1))
 end

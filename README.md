@@ -27,15 +27,13 @@ This is the GitHub repository of Julia source code, including instructions for c
 - **Packages:** <http://pkg.julialang.org/>
 - **Source code:** <https://github.com/JuliaLang/julia>
 - **Git clone URL:** <git://github.com/JuliaLang/julia.git>
+- **Discussion forum:** <https://discourse.julialang.org>
 - **Mailing lists:** <http://julialang.org/community/>
 - **Gitter:** <https://gitter.im/JuliaLang/julia>
 - **IRC:** <http://webchat.freenode.net/?channels=julia>
 - **Code coverage:** <https://coveralls.io/r/JuliaLang/julia>
 
-The mailing list for developer discussion is
-<http://groups.google.com/group/julia-dev/>. All are welcome, but the volume
-of messages is higher, and the discussions tend to be more esoteric. New
-developers may find the notes in [CONTRIBUTING](https://github.com/JuliaLang/julia/blob/master/CONTRIBUTING.md) helpful to start contributing to the Julia codebase.
+New developers may find the notes in [CONTRIBUTING](https://github.com/JuliaLang/julia/blob/master/CONTRIBUTING.md) helpful to start contributing to the Julia codebase.
 
 ### External Resources
 <a name="External-Resources"/>
@@ -245,7 +243,6 @@ You must use the `gmake` command on FreeBSD instead of `make`.
 Note that Julia is community-supported and we have little control over our upstream dependencies, you may still run into issues with dependencies and YMMV. Current known issues include:
 
  - The x86 arch doesn't support threading due to lack of compiler runtime library support (set `JULIA_THREADS=0`).
- - libunwind needs a small patch to its tests to compile.
  - OpenBLAS patches in pkg haven't been upstreamed.
  - gfortran can't link binaries. Set `FFLAGS=-Wl,-rpath,/usr/local/lib/gcc6` to work around this (upstream bug submitted to FreeBSD pkg maintainers).
  - System libraries installed by pkg are not on the compiler path by default. You may need to add `LDFLAGS=-L/usr/local/lib` and `CPPFLAGS=-I/usr/local/include` to your environment or `Make.user` file to build successfully.

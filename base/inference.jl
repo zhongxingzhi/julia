@@ -74,6 +74,7 @@ type InferenceState
     bestguess #::Type
     # current active instruction pointers
     ip::IntSet
+    pc´´::Int
     nstmts::Int
     # current exception handler info
     cur_hand #::Tuple{LineNum, Tuple{LineNum, ...}}
@@ -187,7 +188,7 @@ type InferenceState
         frame = new(
             sp, nl, inmodule, 0,
             params,
-            linfo, src, nargs, s, Union{}, W, n,
+            linfo, src, nargs, s, Union{}, W, 1, n,
             cur_hand, handler_at, n_handlers,
             ssavalue_uses, ssavalue_init,
             ObjectIdDict(), #Dict{InferenceState, Vector{LineNum}}(),
@@ -230,6 +231,8 @@ nactive[] = 0
 const workq = Vector{InferenceState}() # set of InferenceState objects that can make immediate progress
 
 #### helper functions ####
+
+@inline slot_id(s) = isa(s, SlotNumber) ? (s::SlotNumber).id : (s::TypedSlot).id # using a function to ensure we can infer this
 
 # avoid cycle due to over-specializing `any` when used by inference
 function _any(f::ANY, a)
@@ -622,16 +625,14 @@ function apply_type_tfunc(args...)
     if headtype === Union
         largs == 1 && return Type{Bottom}
         largs == 2 && return args[2]
-        args = args[2:end]
-        if all(isType, args)
-            try
-                return Type{Union{map(t->t.parameters[1],args)...}}
-            catch
-                return Any
-            end
-        else
-            return Any
+        for i = 2:largs
+            isType(args[i]) || return Any
         end
+        ty = Union{}
+        for i = 2:largs
+            ty = Union{ty, args[i].parameters[1]}
+        end
+        return Type{ty}
     elseif isa(headtype, Union)
         return Any
     end
@@ -1206,7 +1207,7 @@ function abstract_eval(e::ANY, vtypes::VarTable, sv::InferenceState)
     elseif isa(e,SSAValue)
         return abstract_eval_ssavalue(e::SSAValue, sv.src)
     elseif isa(e,Slot)
-        return vtypes[e.id].typ
+        return vtypes[slot_id(e)].typ
     elseif isa(e,Symbol)
         return abstract_eval_global(sv.mod, e)
     elseif isa(e,GlobalRef)
@@ -1416,37 +1417,44 @@ function tmerge(typea::ANY, typeb::ANY)
 end
 
 function smerge(sa::Union{NotFound,VarState}, sb::Union{NotFound,VarState})
+    sa === sb && return sa
     sa === NF && return sb
     sb === NF && return sa
-    issubstate(sa,sb) && return sb
-    issubstate(sb,sa) && return sa
-    VarState(tmerge(sa.typ, sb.typ), sa.undef | sb.undef)
+    issubstate(sa, sb) && return sb
+    issubstate(sb, sa) && return sa
+    return VarState(tmerge(sa.typ, sb.typ), sa.undef | sb.undef)
 end
 
-tchanged(n::ANY, o::ANY) = o===NF || (n!==NF && !(n ⊑ o))
-schanged(n::ANY, o::ANY) = o===NF || (n!==NF && !issubstate(n, o))
+@inline tchanged(n::ANY, o::ANY) = o === NF || (n !== NF && !(n ⊑ o))
+@inline schanged(n::ANY, o::ANY) = (n !== o) && (o === NF || (n !== NF && !issubstate(n, o)))
 
 function stupdate!(state::Tuple{}, changes::StateUpdate)
     newst = copy(changes.state)
     if isa(changes.var, Slot)
-        newst[changes.var.id] = changes.vtype
+        newst[slot_id(changes.var::Slot)] = changes.vtype
     end
-    newst
+    return newst
 end
 
 function stupdate!(state::VarTable, change::StateUpdate)
+    if !isa(change.var, Slot)
+        return stupdate!(state, change.state)
+    end
+    newstate = false
+    changeid = slot_id(change.var::Slot)
     for i = 1:length(state)
-        if isa(change.var,Slot) && i == change.var.id
+        if i == changeid
             newtype = change.vtype
         else
             newtype = change.state[i]
         end
         oldtype = state[i]
         if schanged(newtype, oldtype)
+            newstate = state
             state[i] = smerge(oldtype, newtype)
         end
     end
-    return state
+    return newstate
 end
 
 function stupdate!(state::VarTable, changes::VarTable)
@@ -1465,6 +1473,21 @@ end
 stupdate!(state::Tuple{}, changes::VarTable) = copy(changes)
 
 stupdate!(state::Tuple{}, changes::Tuple{}) = false
+
+function stupdate1!(state::VarTable, change::StateUpdate)
+    if !isa(change.var, Slot)
+        return false
+    end
+    i = slot_id(change.var::Slot)
+    newtype = change.vtype
+    oldtype = state[i]
+    if schanged(newtype, oldtype)
+        state[i] = smerge(oldtype, newtype)
+        return true
+    end
+    return false
+end
+
 
 #### helper functions for typeinf initialization and looping ####
 
@@ -1488,7 +1511,7 @@ function find_ssavalue_uses(body)
 end
 function find_ssavalue_uses(e::ANY, uses, line)
     if isa(e,SSAValue)
-        id = (e::SSAValue).id+1
+        id = (e::SSAValue).id + 1
         while length(uses) < id
             push!(uses, IntSet())
         end
@@ -1499,7 +1522,7 @@ function find_ssavalue_uses(e::ANY, uses, line)
         is_meta_expr_head(head) && return
         if head === :(=)
             if isa(b.args[1],SSAValue)
-                id = (b.args[1]::SSAValue).id+1
+                id = (b.args[1]::SSAValue).id + 1
                 while length(uses) < id
                     push!(uses, IntSet())
                 end
@@ -1782,31 +1805,42 @@ function typeinf_frame(frame)
     W = frame.ip
     s = frame.stmt_types
     n = frame.nstmts
-    while !isempty(W)
+    while frame.pc´´ <= n
         # make progress on the active ip set
-        local pc::Int = first(W), pc´::Int
+        local pc::Int = frame.pc´´ # current program-counter
         while true # inner loop optimizes the common case where it can run straight from pc to pc + 1
             #print(pc,": ",s[pc],"\n")
+            local pc´::Int = pc + 1 # next program-counter (after executing instruction)
+            if pc == frame.pc´´
+                # need to update pc´´ to point at the new lowest instruction in W
+                min_pc = next(W, Int64(pc) + 1)[1]
+                if min_pc >= W.limit
+                    frame.pc´´ = max(min_pc, n + 1)
+                else
+                    frame.pc´´ = min_pc
+                end
+            end
             delete!(W, pc)
             frame.currpc = pc
             frame.cur_hand = frame.handler_at[pc]
             stmt = frame.src.code[pc]
             changes = abstract_interpret(stmt, s[pc]::Array{Any,1}, frame)
             if changes === ()
-                # this line threw an error and there is no need to continue
-                break
-                changes = s[pc]
+                break # this line threw an error and so there is no need to continue
+                # changes = s[pc]
             end
-            if frame.cur_hand !== ()
-                # propagate type info to exception handler
+            if frame.cur_hand !== () && isa(changes, StateUpdate)
+                # propagate new type info to exception handler
+                # the handling for Expr(:enter) propagates all changes from before the try/catch
+                # so this only needs to propagate any changes
                 l = frame.cur_hand[1]
-                newstate = stupdate!(s[l], changes)
-                if newstate !== false
+                if stupdate1!(s[l]::VarTable, changes::StateUpdate) !== false
+                    if l < frame.pc´´
+                        frame.pc´´ = l
+                    end
                     push!(W, l)
-                    s[l] = newstate
                 end
             end
-            pc´ = pc+1
             if isa(changes, StateUpdate) && isa((changes::StateUpdate).var, SSAValue)
                 # directly forward changes to an SSAValue to the applicable line
                 changes = changes::StateUpdate
@@ -1817,6 +1851,9 @@ function typeinf_frame(frame)
                     frame.src.ssavaluetypes[id] = tmerge(old, new)
                     for r in frame.ssavalue_uses[id]
                         if s[r] !== () # s[r] === () => unreached statement
+                            if r < frame.pc´´
+                                frame.pc´´ = r
+                            end
                             push!(W, r)
                         end
                     end
@@ -1840,6 +1877,9 @@ function typeinf_frame(frame)
                         newstate = stupdate!(s[l], changes)
                         if newstate !== false
                             # add else branch to active IP list
+                            if l < frame.pc´´
+                                frame.pc´´ = l
+                            end
                             push!(W, l)
                             s[l] = newstate
                         end
@@ -1854,6 +1894,9 @@ function typeinf_frame(frame)
                             # notify backedges of updated type information
                             for caller_pc in callerW
                                 if caller.stmt_types[caller_pc] !== ()
+                                    if caller_pc < caller.pc´´
+                                        caller.pc´´ = caller_pc
+                                    end
                                     push!(caller.ip, caller_pc)
                                 end
                             end
@@ -1869,19 +1912,13 @@ function typeinf_frame(frame)
                     new = s[pc]::Array{Any,1}
                     newstate = stupdate!(old, new)
                     if newstate !== false
+                        if l < frame.pc´´
+                            frame.pc´´ = l
+                        end
                         push!(W, l)
                         s[l] = newstate
                     end
-#                        if frame.handler_at[l] === 0
-#                            frame.n_handlers += 1
-#                            if frame.n_handlers > 25
-#                                # too many exception handlers slows down inference a lot.
-#                                # for an example see test/libgit2.jl on 0.5-pre master
-#                                # around e.g. commit c072d1ce73345e153e4fddf656cda544013b1219
-#                                inference_stack = (inference_stack::CallStack).prev
-#                                return (ast0, Any, false)
-#                            end
-#                        end
+                    typeassert(s[l], VarTable)
                     frame.handler_at[l] = frame.cur_hand
                 elseif hd === :leave
                     for i = 1:((stmt.args[1])::Int)
@@ -1892,7 +1929,17 @@ function typeinf_frame(frame)
             pc´ > n && break # can't proceed with the fast-path fall-through
             frame.handler_at[pc´] = frame.cur_hand
             newstate = stupdate!(s[pc´], changes)
-            if newstate !== false
+            if isa(stmt, GotoNode) && frame.pc´´ < pc´
+                # if we are processing a goto node anyways,
+                # (such as a terminator for a loop, if-else, or try block),
+                # consider whether we should jump to an older backedge first,
+                # to try to traverse the statements in approximate dominator order
+                if newstate !== false
+                    s[pc´] = newstate
+                end
+                push!(W, pc´)
+                pc = frame.pc´´
+            elseif newstate !== false
                 s[pc´] = newstate
                 pc = pc´
             elseif pc´ in W
@@ -1904,6 +1951,7 @@ function typeinf_frame(frame)
     end
 
     # with no active ip's, type inference on frame is done if there are no outstanding (unfinished) edges
+    #@assert isempty(W)
     @assert !frame.inferred
     finished = isempty(frame.edges)
     if isempty(workq)
@@ -2116,7 +2164,7 @@ end
 
 function eval_annotate(e::ANY, vtypes::ANY, sv::InferenceState, undefs::Array{Bool,1}, pass::Int)
     if isa(e, Slot)
-        id = (e::Slot).id
+        id = slot_id(e)
         s = vtypes[id]
         vt = widenconst(s.typ)
         if pass == 1
@@ -2175,11 +2223,11 @@ function type_annotate!(sv::InferenceState)
         if st_i !== ()
             # st_i === ()  =>  unreached statement  (see issue #7836)
             eval_annotate(expr, st_i, sv, undefs, 1)
-            if isa(expr, Expr) && expr.head == :(=) && i < nexpr && isa(expr.args[1],Slot) && states[i+1] !== ()
+            if isa(expr, Expr) && expr.head == :(=) && i < nexpr && isa(expr.args[1], Slot) && states[i + 1] !== ()
                 # record type of assigned slot by looking at the next statement.
                 # this is needed in case the slot is never used (which makes eval_annotate miss it).
-                id = expr.args[1].id
-                record_slot_type!(id, widenconst(states[i+1][id].typ), src.slottypes)
+                id = slot_id(expr.args[1])
+                record_slot_type!(id, widenconst(states[i + 1][id].typ), src.slottypes)
             end
         elseif sv.optimize
             if ((isa(expr, Expr) && is_meta_expr(expr::Expr)) ||
@@ -2236,29 +2284,30 @@ end
 # other slots by offset.
 function substitute!(e::ANY, na, argexprs, spvals, offset)
     if isa(e, Slot)
-        if 1 <= e.id <= na
-            ae = argexprs[e.id]
+        id = slot_id(e)
+        if 1 <= id <= na
+            ae = argexprs[id]
             if isa(e, TypedSlot) && isa(ae, Slot)
                 return TypedSlot(ae.id, e.typ)
             end
             return ae
         end
         if isa(e, SlotNumber)
-            return SlotNumber(e.id+offset)
+            return SlotNumber(id + offset)
         else
-            return TypedSlot(e.id+offset, e.typ)
+            return TypedSlot(id + offset, e.typ)
         end
     end
-    if isa(e,NewvarNode)
+    if isa(e, NewvarNode)
         return NewvarNode(substitute!(e.slot, na, argexprs, spvals, offset))
     end
-    if isa(e,Expr)
+    if isa(e, Expr)
         e = e::Expr
         head = e.head
         if head === :static_parameter
             return spvals[e.args[1]]
         elseif !is_meta_expr_head(head)
-            for i=1:length(e.args)
+            for i = 1:length(e.args)
                 e.args[i] = substitute!(e.args[i], na, argexprs, spvals, offset)
             end
         end
@@ -2291,9 +2340,9 @@ function exprtype(x::ANY, src::CodeInfo, mod::Module)
     if isa(x, Expr)
         return (x::Expr).typ
     elseif isa(x, SlotNumber)
-        return src.slottypes[x.id]
+        return src.slottypes[(x::SlotNumber).id]
     elseif isa(x, TypedSlot)
-        return (x::Slot).typ
+        return (x::TypedSlot).typ
     elseif isa(x, SSAValue)
         return abstract_eval_ssavalue(x::SSAValue, src)
     elseif isa(x, Symbol)
@@ -2653,18 +2702,11 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
         isa(si, TypeVar) && return NF
     end
 
-    # see if the method has been previously inferred (and cached)
-    linfo = code_for_method(method, metharg, methsp, true)
-    if isa(linfo, MethodInstance) && isdefined(linfo, :inferred)
-        src = (linfo::MethodInstance).inferred
-    elseif !method.isstaged
-        # if we decided in the past not to try to infer this particular signature
-        # (due to signature coarsening in abstract_call_gf_by_type)
-        # don't infer it now, as attempting to force it now would be a bad idea (non terminating)
-        force_infer = false
+    # some gf have special tfunc, meaning they wouldn't have been inferred yet
+    # check the same conditions from abstract_call to detect this case
+    force_infer = false
+    if !method.isstaged
         if method.module == _topmod(method.module) || (isdefined(Main, :Base) && method.module == Main.Base)
-            # however, some gf have special tfunc, meaning they wouldn't have been inferred yet
-            # check the same conditions from abstract_call to detect this case
             if method.name == :getindex || method.name == :next || method.name == :indexed_next
                 if length(atypes) > 2 && atypes[3] ⊑ Int
                     at2 = widenconst(atypes[2])
@@ -2676,54 +2718,68 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
                 end
             end
         end
-        frame = nothing
-        if force_infer
-            if !isa(linfo, MethodInstance)
-                linfo = code_for_method(method, metharg, methsp)
-            end
-            if isa(linfo, MethodInstance)
-                linfo = linfo::MethodInstance
-                if isa(atypes[3], Const)
-                    # Since we inferred this with the information that atypes[3]::Const,
-                    # must inline with that same information.
-                    # We do that by overriding the argument type,
-                    # while ensuring we don't cache that information
-                    # This isn't particularly important for `getindex`,
-                    # as we'll be able to fix that up at the end of inlinable when we verify the return type.
-                    # But `next` and `indexed_next` make tuples which would end up burying some of that information in the AST
-                    # where we can't easily correct it afterwards.
-                    src = get_source(linfo)
-                    frame = InferenceState(linfo, src, #=optimize=#true, #=cache=#false, sv.params)
-                    frame.stmt_types[1][3] = VarState(atypes[3], false)
-                    typeinf_loop(frame)
-                else
-                    # If we don't have any special extra information, just infer and cache normally.
-                    frame = typeinf_frame(linfo, nothing, #=optimize=#true, #=cache=#true, sv.params)
-                end
-            end
-        end
-        if isa(frame, InferenceState) && frame.inferred
-            linfo = frame.linfo
-            src = frame.src
-        else
-            linfo = nothing
-            src = nothing
-        end
-    else
-        linfo = nothing
-        src = nothing
     end
 
-    if isa(linfo, MethodInstance) && linfo.jlcall_api == 2
+    # see if the method has been previously inferred (and cached)
+    linfo = code_for_method(method, metharg, methsp, !force_infer) # Union{Void, MethodInstance}
+    isa(linfo, MethodInstance) || return invoke_NF()
+    linfo = linfo::MethodInstance
+    if linfo.jlcall_api == 2
         # in this case function can be inlined to a constant
         return inline_as_constant(linfo.inferred, argexprs, sv)
     end
 
-    if !isa(src, CodeInfo) || !src.inferred || !src.inlineable
+    # see if the method has a current InferenceState frame
+    # or existing inferred code info
+    frame = nothing # Union{Void, InferenceState}
+    src = nothing # Union{Void, CodeInfo}
+    if force_infer && isa(atypes[3], Const)
+        # Since we inferred this with the information that atypes[3]::Const,
+        # must inline with that same information.
+        # We do that by overriding the argument type,
+        # while ensuring we don't cache that information
+        # This isn't particularly important for `getindex`,
+        # as we'll be able to fix that up at the end of inlinable when we verify the return type.
+        # But `next` and `indexed_next` make tuples which would end up burying some of that information in the AST
+        # where we can't easily correct it afterwards.
+        frame = InferenceState(linfo, get_source(linfo), #=optimize=#true, #=cache=#false, sv.params)
+        frame.stmt_types[1][3] = VarState(atypes[3], false)
+        typeinf_loop(frame)
+    else
+        if isdefined(linfo, :inferred)
+            # use cache
+            src = linfo.inferred
+        elseif force_infer
+            # create inferred code on-demand
+            # but if we decided in the past not to try to infer this particular signature
+            # (due to signature coarsening in abstract_call_gf_by_type)
+            # don't infer it now, as attempting to force it now would be a bad idea (non terminating)
+            frame = typeinf_frame(linfo, nothing, #=optimize=#true, #=cache=#true, sv.params)
+        end
+    end
+
+    # compute the return value
+    if isa(frame, InferenceState)
+        frame = frame::InferenceState
+        frame.inferred || return invoke_NF()
+        linfo = frame.linfo
+        src = frame.src
+        if linfo.jlcall_api == 2
+            # in this case function can be inlined to a constant
+            return inline_as_constant(linfo.inferred, argexprs, sv)
+        end
+        rettype = widenconst(frame.bestguess)
+    else
+        rettype = linfo.rettype
+    end
+
+    # check that the code is inlineable
+    isa(src, CodeInfo) || return invoke_NF()
+    src = src::CodeInfo
+    ast = src.code
+    if !src.inferred || !src.inlineable
         return invoke_NF()
     end
-    ast = src.code
-    rettype = linfo.rettype
 
     spvals = Any[]
     for i = 1:length(methsp)
@@ -2768,7 +2824,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
         for j = length(body.args):-1:1
             b = body.args[j]
             if occ < 6
-                occ += occurs_more(b, x->(isa(x,Slot)&&x.id==i), 6)
+                occ += occurs_more(b, x->(isa(x, Slot) && slot_id(x) == i), 6)
             end
             if occ > 0 && affect_free && !effect_free(b, src, method.module, true)
                 #TODO: we might be able to short-circuit this test better by memoizing effect_free(b) in the for loop over i
@@ -3286,9 +3342,9 @@ function _slot_replace!(e, id::Int, rhs::ANY, T::ANY)
 end
 
 occurs_undef(var::Int, expr, flags) =
-    flags[var]&Slot_UsedUndef != 0 && occurs_more(expr, e->(isa(e,Slot) && e.id==var), 0)>0
+    flags[var] & Slot_UsedUndef != 0 && occurs_more(expr, e -> (isa(e, Slot) && slot_id(e) == var), 0) > 0
 
-is_argument(nargs::Int, v::Slot) = v.id <= nargs
+is_argument(nargs::Int, v::Slot) = slot_id(v) <= nargs
 
 # remove all single-assigned vars v in "v = x" where x is an argument.
 # "sa" is the result of find_sa_vars
@@ -3303,14 +3359,14 @@ function remove_redundant_temp_vars(src::CodeInfo, nargs::Int, sa, T)
             # this transformation is not valid for vars used before def.
             # we need to preserve the point of assignment to know where to
             # throw errors (issue #4645).
-            if T===SSAValue || !occurs_undef(v, bexpr, flags)
+            if T === SSAValue || !occurs_undef(v, bexpr, flags)
                 # the transformation is not ideal if the assignment
                 # is present for the auto-unbox functionality
                 # (from inlining improved type inference information)
                 # and this transformation would worsen the type information
                 # everywhere later in the function
-                ityp = isa(init,TypedSlot) ? init.typ : src.slottypes[init.id]
-                if ityp ⊑ (T===SSAValue ? ssavalue_types[v+1] : src.slottypes[v])
+                ityp = isa(init, TypedSlot) ? init.typ : src.slottypes[(init::SlotNumber).id]
+                if ityp ⊑ (T === SSAValue ? ssavalue_types[v + 1] : src.slottypes[v])
                     delete_var!(src, v, T)
                     slot_replace!(src, v, init, T)
                 end
@@ -3333,7 +3389,7 @@ function find_sa_vars(src::CodeInfo, nargs::Int)
             if isa(lhs, SSAValue)
                 gss[lhs.id] = e.args[2]
             elseif isa(lhs, Slot)
-                id = lhs.id
+                id = slot_id(lhs)
                 if id > nargs  # exclude args
                     if !haskey(av, id)
                         av[id] = e.args[2]
@@ -3354,7 +3410,7 @@ symequal(x::ANY     , y::ANY)      = x === y
 
 function occurs_outside_getfield(e::ANY, sym::ANY,
                                  sv::InferenceState, field_count::Int, field_names::ANY)
-    if e===sym || (isa(e,Slot) && isa(sym,Slot) && (e::Slot).id == (sym::Slot).id)
+    if e === sym || (isa(e, Slot) && isa(sym, Slot) && slot_id(e) == slot_id(sym))
         return true
     end
     if isa(e,Expr)
@@ -3376,13 +3432,13 @@ function occurs_outside_getfield(e::ANY, sym::ANY,
                                            field_count, field_names)
         else
             if (head === :block && isa(sym, Slot) &&
-                sv.src.slotflags[(sym::Slot).id] & Slot_UsedUndef == 0)
+                sv.src.slotflags[slot_id(sym)] & Slot_UsedUndef == 0)
                 ignore_void = true
             else
                 ignore_void = false
             end
             for a in e.args
-                if ignore_void && isa(a, Slot) && (a::Slot).id == (sym::Slot).id
+                if ignore_void && isa(a, Slot) && slot_id(a) == slot_id(sym)
                     continue
                 end
                 if occurs_outside_getfield(a, sym, sv, field_count, field_names)
@@ -3402,7 +3458,7 @@ function void_use_elim_pass!(sv::InferenceState)
             # Explicitly listed here for clarity
             return false
         elseif isa(ex, Slot)
-            return sv.src.slotflags[(ex::Slot).id] & Slot_UsedUndef != 0
+            return sv.src.slotflags[slot_id(ex)] & Slot_UsedUndef != 0
         elseif isa(ex, GlobalRef)
             ex = ex::GlobalRef
             return !isdefined(ex.mod, ex.name)
@@ -3796,12 +3852,12 @@ function alloc_elim_pass!(sv::InferenceState)
         end
         e = e::Expr
         if e.head === :(=) && (isa(e.args[1], SSAValue) ||
-                               (isa(e.args[1],Slot) && haskey(vs, e.args[1].id)))
+                               (isa(e.args[1], Slot) && haskey(vs, slot_id(e.args[1]))))
             var = e.args[1]
             rhs = e.args[2]
             # Need to make sure LLVM can recognize this as LLVM ssa value too
             is_ssa = (isa(var, SSAValue) ||
-                      sv.src.slotflags[(var::Slot).id] & Slot_UsedUndef == 0)
+                      sv.src.slotflags[slot_id(var)] & Slot_UsedUndef == 0)
         else
             var = nothing
             rhs = e
@@ -3850,12 +3906,11 @@ function alloc_elim_pass!(sv::InferenceState)
                         if is_ssa
                             tmpv = newvar!(sv, elty)
                         else
-                            var = var::Slot
                             tmpv = add_slot!(sv.src, widenconst(elty), false,
-                                             sv.src.slotnames[var.id])
-                            slot_id = tmpv.id
-                            new_slots[j] = slot_id
-                            sv.src.slotflags[slot_id] |= Slot_UsedUndef
+                                             sv.src.slotnames[slot_id(var)])
+                            tmpv_id = slot_id(tmpv)
+                            new_slots[j] = tmpv_id
+                            sv.src.slotflags[tmpv_id] |= Slot_UsedUndef
                         end
                         tmp = Expr(:(=), tmpv, tupelt)
                         insert!(body, i+n_ins, tmp)
@@ -3865,12 +3920,12 @@ function alloc_elim_pass!(sv::InferenceState)
                 end
                 replace_getfield!(bexpr, var, vals, field_names, sv)
                 if !is_ssa
-                    i += replace_newvar_node!(body, (var::Slot).id,
+                    i += replace_newvar_node!(body, slot_id(var),
                                               new_slots, i)
                 elseif isa(var, Slot)
                     # occurs_outside_getfield might have allowed
                     # void use of the slot, we need to delete them too
-                    i -= delete_void_use!(body, var::Slot, i)
+                    i -= delete_void_use!(body, var, i)
                 end
             end
             # Do not increment counter and do the optimization recursively
@@ -3890,10 +3945,10 @@ function replace_newvar_node!(body, orig, new_slots, i0)
     narg = length(body)
     i = 1
     nins = 0
-    newvars = [NewvarNode(SlotNumber(id)) for id in new_slots]
+    newvars = [ NewvarNode(SlotNumber(id)) for id in new_slots ]
     while i <= narg
         a = body[i]
-        if isa(a, NewvarNode) && (a::NewvarNode).slot.id == orig
+        if isa(a, NewvarNode) && slot_id((a::NewvarNode).slot) == orig
             splice!(body, i, newvars)
             if i - nins < i0
                 nins += nvars - 1
@@ -3914,7 +3969,7 @@ function delete_void_use!(body, var::Slot, i0)
     ndel = 0
     while i <= narg
         a = body[i]
-        if isa(a, Slot) && (a::Slot).id == var.id
+        if isa(a, Slot) && slot_id(a) == slot_id(var)
             deleteat!(body, i)
             if i + ndel < i0
                 ndel += 1
@@ -3942,20 +3997,21 @@ function replace_getfield!(e::Expr, tupname, vals, field_names, sv::InferenceSta
             val = vals[idx]
             # original expression might have better type info than
             # the tuple element expression that's replacing it.
-            if isa(val,Slot)
+            if isa(val, Slot)
                 val = val::Slot
-                valtyp = isa(val,TypedSlot) ? val.typ : sv.src.slottypes[val.id]
+                id = slot_id(val)
+                valtyp = isa(val, TypedSlot) ? val.typ : sv.src.slottypes[id]
                 if a.typ ⊑ valtyp && !(valtyp ⊑ a.typ)
-                    if isa(val,TypedSlot)
-                        val = TypedSlot(val.id, a.typ)
+                    if isa(val, TypedSlot)
+                        val = TypedSlot(id, a.typ)
                     end
-                    sv.src.slottypes[val.id] = widenconst(a.typ)
+                    sv.src.slottypes[id] = widenconst(a.typ)
                 end
             elseif isa(val,SSAValue)
                 val = val::SSAValue
                 typ = exprtype(val, sv.src, sv.mod)
                 if a.typ ⊑ typ && !(typ ⊑ a.typ)
-                    sv.src.ssavaluetypes[val.id+1] = a.typ
+                    sv.src.ssavaluetypes[val.id + 1] = a.typ
                 end
             end
             e.args[i] = val

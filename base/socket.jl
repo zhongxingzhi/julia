@@ -481,8 +481,8 @@ end
 """
     recvfrom(socket::UDPSocket) -> (address, data)
 
-Read a UDP packet from the specified socket, returning a tuple of (address, data), where
-address will be either IPv4 or IPv6 as appropriate.
+Read a UDP packet from the specified socket, returning a tuple of `(address, data)`, where
+`address` will be either IPv4 or IPv6 as appropriate.
 """
 function recvfrom(sock::UDPSocket)
     # If the socket has not been bound, it will be bound implicitly to ::0 and a random port
@@ -755,7 +755,7 @@ Listen on port on the address specified by `addr`.
 By default this listens on `localhost` only.
 To listen on all interfaces pass `IPv4(0)` or `IPv6(0)` as appropriate.
 `backlog` determines how many connections can be pending (not having
-called [`accept`](:func:`accept`)) before the server will begin to
+called [`accept`](@ref)) before the server will begin to
 reject them. The default value of `backlog` is 511.
 """
 function listen(addr; backlog::Integer=BACKLOG_DEFAULT)

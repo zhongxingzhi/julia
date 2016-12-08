@@ -43,7 +43,11 @@ namespace llvm {
     extern Pass *createLowerSimdLoopPass();
 }
 
-#include <llvm/Bitcode/ReaderWriter.h>
+#if JL_LLVM_VERSION >= 40000
+#  include <llvm/Bitcode/BitcodeWriter.h>
+#else
+#  include <llvm/Bitcode/ReaderWriter.h>
+#endif
 #if JL_LLVM_VERSION >= 30500
 #include <llvm/Bitcode/BitcodeWriterPass.h>
 #endif
@@ -308,7 +312,7 @@ void NotifyDebugger(jit_code_entry *JITCodeEntry)
 }
 // ------------------------ END OF TEMPORARY COPY FROM LLVM -----------------
 
-#ifdef _OS_LINUX_
+#if defined(_OS_LINUX_)
 // Resolve non-lock free atomic functions in the libatomic library.
 // This is the library that provides support for c11/c++11 atomic operations.
 static uint64_t resolve_atomic(const char *name)
@@ -538,7 +542,7 @@ void JuliaOJIT::addModule(std::unique_ptr<Module> M)
                         // Step 2: Search the program symbols
                         if (uint64_t addr = SectionMemoryManager::getSymbolAddressInProcess(Name))
                             return JL_SymbolInfo(addr, JITSymbolFlags::Exported);
-#ifdef _OS_LINUX_
+#if defined(_OS_LINUX_)
                         if (uint64_t addr = resolve_atomic(Name.c_str()))
                             return JL_SymbolInfo(addr, JITSymbolFlags::Exported);
 #endif

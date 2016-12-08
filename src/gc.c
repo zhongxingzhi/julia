@@ -193,6 +193,13 @@ static void jl_gc_run_finalizers_in_list(jl_ptls_t ptls, arraylist_t *list)
 
 static void run_finalizers(jl_ptls_t ptls)
 {
+    // Racy fast path:
+    // The race here should be OK since the race can only happen if
+    // another thread is writing to it with the lock held. In such case,
+    // we don't need to run pending finalizers since the writer thread
+    // will flush it.
+    if (to_finalize.len == 0)
+        return;
     JL_LOCK_NOGC(&finalizers_lock);
     if (to_finalize.len == 0) {
         JL_UNLOCK_NOGC(&finalizers_lock);
@@ -818,7 +825,9 @@ JL_DLLEXPORT jl_value_t *jl_gc_pool_alloc(jl_ptls_t ptls, int pool_offset,
     // to workaround a llvm bug.
     // Ref https://llvm.org/bugs/show_bug.cgi?id=27190
     jl_gc_pool_t *p = (jl_gc_pool_t*)((char*)ptls + pool_offset);
+#ifdef JULIA_ENABLE_THREADING
     assert(ptls->gc_state == 0);
+#endif
 #ifdef MEMDEBUG
     return jl_gc_big_alloc(ptls, osize);
 #endif
@@ -1236,30 +1245,51 @@ NOINLINE static int gc_mark_module(jl_ptls_t ptls, jl_module_t *m, int d)
     return refyoung;
 }
 
+// Handle the case where the stack is only partially copied.
+STATIC_INLINE uintptr_t gc_get_stack_addr(void *_addr, uintptr_t offset,
+                                          uintptr_t lb, uintptr_t ub)
+{
+    uintptr_t addr = (uintptr_t)_addr;
+    if (addr >= lb && addr < ub)
+        return addr + offset;
+    return addr;
+}
+
+STATIC_INLINE uintptr_t gc_read_stack(void *_addr, uintptr_t offset,
+                                      uintptr_t lb, uintptr_t ub)
+{
+    uintptr_t real_addr = gc_get_stack_addr(_addr, offset, lb, ub);
+    return *(uintptr_t*)real_addr;
+}
+
 static void gc_mark_stack(jl_ptls_t ptls, jl_value_t *ta, jl_gcframe_t *s,
-                          intptr_t offset, int d)
+                          uintptr_t offset, uintptr_t lb, uintptr_t ub, int d)
 {
     while (s != NULL) {
-        s = (jl_gcframe_t*)((char*)s + offset);
-        jl_value_t ***rts = (jl_value_t***)(((void**)s)+2);
-        size_t nr = s->nroots>>1;
-        if (s->nroots & 1) {
-            for(size_t i=0; i < nr; i++) {
-                jl_value_t **ptr = (jl_value_t**)((char*)rts[i] + offset);
-                if (*ptr != NULL) {
-                    gc_push_root(ptls, *ptr, d);
+        jl_value_t ***rts = (jl_value_t***)(((void**)s) + 2);
+        size_t nroots = gc_read_stack(&s->nroots, offset, lb, ub);
+        size_t nr = nroots >> 1;
+        if (nroots & 1) {
+            for (size_t i = 0; i < nr; i++) {
+                void **slot = (void**)gc_read_stack(&rts[i], offset, lb, ub);
+                void *obj = (void*)gc_read_stack(slot, offset, lb, ub);
+                if (obj != NULL) {
+                    gc_push_root(ptls, obj, d);
                 }
             }
         }
         else {
-            for(size_t i=0; i < nr; i++) {
-                if (rts[i] != NULL) {
-                    verify_parent2("task", ta, &rts[i], "stack(%d)", (int)i);
-                    gc_push_root(ptls, rts[i], d);
+            for (size_t i=0; i < nr; i++) {
+                void *obj = (void*)gc_read_stack(&rts[i], offset, lb, ub);
+                if (obj) {
+                    verify_parent2("task", ta,
+                                   gc_get_stack_addr(&rts[i], offset, lb, ub),
+                                   "stack(%d)", (int)i);
+                    gc_push_root(ptls, obj, d);
                 }
             }
         }
-        s = s->prev;
+        s = (jl_gcframe_t*)gc_read_stack(&s->prev, offset, lb, ub);
     }
 }
 
@@ -1282,16 +1312,19 @@ static void gc_mark_task_stack(jl_ptls_t ptls, jl_task_t *ta, int d)
 #endif
     }
     if (ta == ptls2->current_task) {
-        gc_mark_stack(ptls, (jl_value_t*)ta, ptls2->pgcstack, 0, d);
+        gc_mark_stack(ptls, (jl_value_t*)ta, ptls2->pgcstack,
+                      0, 0, (uintptr_t)-1, d);
     }
     else if (stkbuf) {
-        intptr_t offset;
+        uintptr_t offset = 0;
+        uintptr_t lb = 0;
+        uintptr_t ub = (uintptr_t)-1;
 #ifdef COPY_STACKS
-        offset = (char *)ta->stkbuf - ((char *)ptls2->stackbase - ta->ssize);
-#else
-        offset = 0;
+        ub = (uintptr_t)ptls2->stackbase;
+        lb = ub - ta->ssize;
+        offset = (uintptr_t)ta->stkbuf - lb;
 #endif
-        gc_mark_stack(ptls, (jl_value_t*)ta, ta->gcstack, offset, d);
+        gc_mark_stack(ptls, (jl_value_t*)ta, ta->gcstack, offset, lb, ub, d);
     }
 }
 

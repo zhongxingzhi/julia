@@ -82,10 +82,10 @@ A = rand(5,4,3)
 @test checkbounds(Bool, A, trues(5, 4, 3)) == true
 @test checkbounds(Bool, A, trues(5, 4, 2)) == false
 @test checkbounds(Bool, A, trues(5, 12)) == false
-@test checkbounds(Bool, A, trues(1, 5), trues(1, 4, 1), trues(1, 1, 3)) == true
+@test checkbounds(Bool, A, trues(1, 5), trues(1, 4, 1), trues(1, 1, 3)) == false
 @test checkbounds(Bool, A, trues(1, 5), trues(1, 4, 1), trues(1, 1, 2)) == false
 @test checkbounds(Bool, A, trues(1, 5), trues(1, 5, 1), trues(1, 1, 3)) == false
-@test checkbounds(Bool, A, trues(1, 5), :, 2) == true
+@test checkbounds(Bool, A, trues(1, 5), :, 2) == false
 
 # array of CartesianIndex
 @test checkbounds(Bool, A, [CartesianIndex((1, 1, 1))]) == true
@@ -563,6 +563,10 @@ function test_cat(::Type{TestAbstractArray})
 
     # 18395
     @test isa(Any["a" 5; 2//3 1.0][2,1], Rational{Int})
+
+    # 13665, 19038
+    @test @inferred(hcat([1.0 2.0], 3))::Array{Float64,2} == [1.0 2.0 3.0]
+    @test @inferred(vcat([1.0, 2.0], 3))::Array{Float64,1} == [1.0, 2.0, 3.0]
 end
 
 function test_ind2sub(::Type{TestAbstractArray})
@@ -785,3 +789,6 @@ end
 @test ndims((1:3)[:,:,1:1,:]) == 4
 @test ndims((1:3)[:,:,1:1]) == 3
 @test ndims((1:3)[:,:,1:1,:,:,[1]]) == 6
+
+# dispatch loop introduced in #19305
+@test [(1:2) zeros(2,2); ones(3,3)] == [[1,2] zeros(2,2); ones(3,3)] == [reshape([1,2],2,1) zeros(2,2); ones(3,3)]

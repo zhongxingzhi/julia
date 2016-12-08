@@ -7,6 +7,16 @@ New language features
 Language changes
 ----------------
 
+  * Multiline and singleline nonstandard command literals have been added. A
+    nonstandard command literal is like a nonstandard string literal, but the
+    syntax uses backquotes (``` ` ```) instead of double quotes, and the
+    resulting macro called is suffixed with `_cmd`. For instance, the syntax
+    ``` q`xyz` ``` is equivalent to `@q_cmd "xyz"`. ([#18644])
+
+  * Nonstandard string and command literals can now be qualified with their
+    module. For instance, `Base.r"x"` is now parsed as `Base.@r_str "x"`.
+    Previously, this syntax parsed as an implicit multiplication. ([#18690])
+
 Breaking changes
 ----------------
 
@@ -60,6 +70,10 @@ Library improvements
     you can now do e.g. `[A I]` and it will concatenate an appropriately sized
     identity matrix ([#19305]).
 
+  * New `accumulate` and `accumulate!` functions, which generalize `cumsum` and `cumprod`. Also known as a [scan](https://en.wikipedia.org/wiki/Prefix_sum) operation ([#18931]).
+
+  * New `titlecase` function, which capitalizes the first character of each word within a string ([#19469]).
+
 Compiler/Runtime improvements
 -----------------------------
 
@@ -75,6 +89,8 @@ Deprecated or removed
   * infix operator `$` has been deprecated in favor of infix `⊻` or function `xor()` ([#18977]).
 
   * `Dates.recur` has been deprecated in favor of `filter` ([#19288])
+
+  * `cummin` and `cummax` have been deprecated in favor of `accumulate`.
 
 Julia v0.5.0 Release Notes
 ==========================
@@ -701,9 +717,13 @@ Language tooling improvements
 [#18346]: https://github.com/JuliaLang/julia/issues/18346
 [#18442]: https://github.com/JuliaLang/julia/issues/18442
 [#18473]: https://github.com/JuliaLang/julia/issues/18473
+[#18644]: https://github.com/JuliaLang/julia/issues/18644
+[#18690]: https://github.com/JuliaLang/julia/issues/18690
 [#18839]: https://github.com/JuliaLang/julia/issues/18839
+[#18931]: https://github.com/JuliaLang/julia/issues/18931
 [#18977]: https://github.com/JuliaLang/julia/issues/18977
 [#19018]: https://github.com/JuliaLang/julia/issues/19018
 [#19233]: https://github.com/JuliaLang/julia/issues/19233
 [#19288]: https://github.com/JuliaLang/julia/issues/19288
 [#19305]: https://github.com/JuliaLang/julia/issues/19305
+[#19469]: https://github.com/JuliaLang/julia/issues/19469

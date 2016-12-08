@@ -3,7 +3,7 @@
 #include "llvm-version.h"
 #include "platform.h"
 #include "options.h"
-#if defined(_OS_WINDOWS_) && JL_LLVM_VERSION < 30900
+#if defined(_OS_WINDOWS_) && JL_LLVM_VERSION < 40000
 // trick pre-llvm39 into skipping the generation of _chkstk calls
 //   since it has some codegen issues associated with them:
 //   (a) assumed to be within 32-bit offset
@@ -201,7 +201,6 @@ bool imaging_mode = false;
 Module *shadow_output;
 #define jl_Module ctx->f->getParent()
 #define jl_builderModule builder.GetInsertBlock()->getParent()->getParent()
-static MDBuilder *mbuilder;
 
 #if JL_LLVM_VERSION >= 30700
 // No DataLayout pass needed anymore.
@@ -531,7 +530,7 @@ typedef struct {
 
 // information about the context of a piece of code: its enclosing
 // function and module, and visible local variables and labels.
-typedef struct {
+struct jl_codectx_t {
     Function *f;
     // local var info. globals are not in here.
     std::vector<jl_varinfo_t> slots;
@@ -561,8 +560,8 @@ typedef struct {
     bool debug_enabled;
     bool is_inbounds{false};
 
-    jl_cgparams_t *params;
-} jl_codectx_t;
+    const jl_cgparams_t *params;
+};
 
 static jl_cgval_t emit_expr(jl_value_t *expr, jl_codectx_t *ctx);
 
@@ -822,7 +821,7 @@ void jl_dump_compiles(void *s)
 
 // --- entry point ---
 //static int n_emit=0;
-static std::unique_ptr<Module> emit_function(jl_method_instance_t *lam, jl_code_info_t *src, jl_llvm_functions_t *declarations, jl_cgparams_t *params);
+static std::unique_ptr<Module> emit_function(jl_method_instance_t *lam, jl_code_info_t *src, jl_llvm_functions_t *declarations, const jl_cgparams_t *params);
 void jl_add_linfo_in_flight(StringRef name, jl_method_instance_t *linfo, const DataLayout &DL);
 
 // this generates llvm code for the lambda info
@@ -830,7 +829,7 @@ void jl_add_linfo_in_flight(StringRef name, jl_method_instance_t *linfo, const D
 // (and the shadow module), but doesn't yet compile
 // or generate object code for it
 extern "C"
-jl_llvm_functions_t jl_compile_linfo(jl_method_instance_t *li, jl_code_info_t *src, jl_cgparams_t *params)
+jl_llvm_functions_t jl_compile_linfo(jl_method_instance_t *li, jl_code_info_t *src, const jl_cgparams_t *params)
 {
     JL_TIMING(CODEGEN);
     assert(jl_is_method_instance(li));
@@ -888,7 +887,7 @@ jl_llvm_functions_t jl_compile_linfo(jl_method_instance_t *li, jl_code_info_t *s
     assert(jl_is_code_info(src));
 
     // Step 2: setup global state
-    BasicBlock *old = nested_compile ? builder.GetInsertBlock() : NULL;
+    IRBuilderBase::InsertPoint old = builder.saveAndClearIP();
     DebugLoc olddl = builder.getCurrentDebugLocation();
     bool last_n_c = nested_compile;
     if (!nested_compile && dump_compiles_stream != NULL)
@@ -909,10 +908,8 @@ jl_llvm_functions_t jl_compile_linfo(jl_method_instance_t *li, jl_code_info_t *s
         li->functionObjectsDecls.functionObject = NULL;
         li->functionObjectsDecls.specFunctionObject = NULL;
         nested_compile = last_n_c;
-        if (old != NULL) {
-            builder.SetInsertPoint(old);
-            builder.SetCurrentDebugLocation(olddl);
-        }
+        builder.restoreIP(old);
+        builder.SetCurrentDebugLocation(olddl);
         JL_UNLOCK(&codegen_lock); // Might GC
         jl_rethrow_with_add("error compiling %s", jl_symbol_name(li->def ? li->def->name : anonymous_sym));
     }
@@ -954,10 +951,8 @@ jl_llvm_functions_t jl_compile_linfo(jl_method_instance_t *li, jl_code_info_t *s
     }
 
     // Step 6: Done compiling: Restore global state
-    if (old != NULL) {
-        builder.SetInsertPoint(old);
-        builder.SetCurrentDebugLocation(olddl);
-    }
+    builder.restoreIP(old);
+    builder.SetCurrentDebugLocation(olddl);
     nested_compile = last_n_c;
     JL_UNLOCK(&codegen_lock); // Might GC
 
@@ -1256,7 +1251,7 @@ void jl_extern_c(jl_function_t *f, jl_value_t *rt, jl_value_t *argt, char *name)
 // this is paired with jl_dump_function_ir and jl_dump_function_asm in particular ways:
 // misuse will leak memory or cause read-after-free
 extern "C" JL_DLLEXPORT
-void *jl_get_llvmf_defn(jl_method_instance_t *linfo, bool getwrapper, bool optimize, jl_cgparams_t params)
+void *jl_get_llvmf_defn(jl_method_instance_t *linfo, bool getwrapper, bool optimize, const jl_cgparams_t params)
 {
     // `source` is `NULL` for generated functions.
     // The `isstaged` check can be removed if that is not the case anymore.
@@ -1275,7 +1270,8 @@ void *jl_get_llvmf_defn(jl_method_instance_t *linfo, bool getwrapper, bool optim
 
     // Backup the info for the nested compile
     JL_LOCK(&codegen_lock);
-    BasicBlock *old = nested_compile ? builder.GetInsertBlock() : NULL;
+
+    IRBuilderBase::InsertPoint old = builder.saveAndClearIP();
     DebugLoc olddl = builder.getCurrentDebugLocation();
     bool last_n_c = nested_compile;
     nested_compile = true;
@@ -1288,18 +1284,14 @@ void *jl_get_llvmf_defn(jl_method_instance_t *linfo, bool getwrapper, bool optim
     JL_CATCH {
         // something failed!
         nested_compile = last_n_c;
-        if (old != NULL) {
-            builder.SetInsertPoint(old);
-            builder.SetCurrentDebugLocation(olddl);
-        }
+        builder.restoreIP(old);
+        builder.SetCurrentDebugLocation(olddl);
         JL_UNLOCK(&codegen_lock); // Might GC
         jl_rethrow_with_add("error compiling %s", jl_symbol_name(linfo->def ? linfo->def->name : anonymous_sym));
     }
     // Restore the previous compile context
-    if (old != NULL) {
-        builder.SetInsertPoint(old);
-        builder.SetCurrentDebugLocation(olddl);
-    }
+    builder.restoreIP(old);
+    builder.SetCurrentDebugLocation(olddl);
     nested_compile = last_n_c;
 
     if (optimize)
@@ -1338,7 +1330,7 @@ void *jl_get_llvmf_defn(jl_method_instance_t *linfo, bool getwrapper, bool optim
 
 
 extern "C" JL_DLLEXPORT
-void *jl_get_llvmf_decl(jl_method_instance_t *linfo, bool getwrapper, jl_cgparams_t params)
+void *jl_get_llvmf_decl(jl_method_instance_t *linfo, bool getwrapper, const jl_cgparams_t params)
 {
     // `source` is `NULL` for generated functions.
     // The `isstaged` check can be removed if that is not the case anymore.
@@ -2894,6 +2886,7 @@ static jl_cgval_t emit_call_function_object(jl_method_instance_t *li, const jl_c
                                             jl_value_t **args, size_t nargs, jl_value_t *callexpr, jl_codectx_t *ctx)
 {
     Value *theFptr = (Value*)decls.functionObject;
+    jl_value_t *inferred_retty = expr_type(callexpr, ctx);
     if (decls.specFunctionObject != NULL) {
         // emit specialized call site
         jl_value_t *jlretty = li->rettype;
@@ -2907,6 +2900,7 @@ static jl_cgval_t emit_call_function_object(jl_method_instance_t *li, const jl_c
         unsigned idx = 0;
         Value *result;
         if (sret) {
+            assert(!retboxed);
             result = emit_static_alloca(cft->getParamType(0)->getContainedType(0), ctx);
             argvals[idx] = result;
             idx++;
@@ -2951,10 +2945,16 @@ static jl_cgval_t emit_call_function_object(jl_method_instance_t *li, const jl_c
         CallInst *call = builder.CreateCall(prepare_call(cf), ArrayRef<Value*>(&argvals[0], nfargs));
         call->setAttributes(cf->getAttributes());
         mark_gc_uses(gc_uses);
-        return sret ? mark_julia_slot(result, jlretty, tbaa_stack) : mark_julia_type(call, retboxed, jlretty, ctx);
+        if (sret)
+            return mark_julia_slot(result, jlretty, tbaa_stack);
+        // see if codegen has a better type for the call than inference had at the time
+        if (!retboxed && jlretty != inferred_retty) {
+            inferred_retty = jlretty;
+        }
+        return mark_julia_type(call, retboxed, inferred_retty, ctx);
     }
-    return mark_julia_type(emit_jlcall(theFptr, boxed(theF,ctx), &args[1], nargs, ctx), true,
-                           expr_type(callexpr, ctx), ctx);
+    Value *ret = emit_jlcall(theFptr, boxed(theF, ctx), &args[1], nargs, ctx);
+    return mark_julia_type(ret, true, inferred_retty, ctx);
 }
 
 static jl_cgval_t emit_invoke(jl_expr_t *ex, jl_codectx_t *ctx)
@@ -3497,13 +3497,20 @@ static jl_cgval_t emit_expr(jl_value_t *expr, jl_codectx_t *ctx)
 
         Value *bp = NULL, *name, *bp_owner = V_null;
         jl_binding_t *bnd = NULL;
-        if (jl_is_symbol(mn)) {
+        bool issym = jl_is_symbol(mn);
+        bool isglobalref = !issym && jl_is_globalref(mn);
+        if (issym || isglobalref) {
+            jl_module_t *mod = ctx->module;
+            if (isglobalref) {
+                mod = jl_globalref_mod(mn);
+                mn = (jl_value_t*)jl_globalref_name(mn);
+            }
             if (jl_symbol_name((jl_sym_t*)mn)[0] == '@')
                 jl_errorf("macro definition not allowed inside a local scope");
             name = literal_pointer_val(mn);
-            bnd = jl_get_binding_for_method_def(ctx->module, (jl_sym_t*)mn);
+            bnd = jl_get_binding_for_method_def(mod, (jl_sym_t*)mn);
             bp = julia_binding_gv(bnd);
-            bp_owner = literal_pointer_val((jl_value_t*)ctx->module);
+            bp_owner = literal_pointer_val((jl_value_t*)mod);
         }
         else if (jl_is_slot(mn)) {
             int sl = jl_slot_number(mn)-1;
@@ -3527,10 +3534,15 @@ static jl_cgval_t emit_expr(jl_value_t *expr, jl_codectx_t *ctx)
     }
     else if (head == const_sym) {
         jl_sym_t *sym = (jl_sym_t*)args[0];
+        jl_module_t *mod = ctx->module;
+        if (jl_is_globalref(sym)) {
+            mod = jl_globalref_mod(sym);
+            sym = jl_globalref_name(sym);
+        }
         if (jl_is_symbol(sym)) {
             JL_FEAT_REQUIRE(ctx, runtime);
             jl_binding_t *bnd = NULL;
-            (void)global_binding_pointer(ctx->module, sym, &bnd, true, ctx); assert(bnd);
+            (void)global_binding_pointer(mod, sym, &bnd, true, ctx); assert(bnd);
             builder.CreateCall(prepare_call(jldeclareconst_func),
                                literal_pointer_val(bnd));
         }
@@ -3635,14 +3647,13 @@ static Function *gen_cfun_wrapper(jl_function_t *ff, jl_value_t *jlrettype, jl_t
     std::vector<bool> fargt_isboxed(0);
     std::vector<Type*> fargt_sig(0);
     Type *fargt_vasig;
-    std::vector<bool> inRegList(0);
     std::vector<bool> byRefList(0);
     AttributeSet attrs;
     Type *prt = NULL;
     int sret = 0;
     size_t nargs = jl_nparams(argt);
     std::string err_msg = generate_func_sig(&crt, &prt, sret, fargt, fargt_isboxed,
-                                            fargt_sig, fargt_vasig, inRegList, byRefList,
+                                            fargt_sig, fargt_vasig, byRefList,
                                             attrs, jlrettype, argt->parameters, nargs);
     if (!err_msg.empty())
         jl_error(err_msg.c_str());
@@ -3923,7 +3934,7 @@ static Function *gen_cfun_wrapper(jl_function_t *ff, jl_value_t *jlrettype, jl_t
             prt = fargt_sig[0]->getContainedType(0); // sret is a PointerType
         bool issigned = jl_signed_type && jl_subtype(declrt, (jl_value_t*)jl_signed_type, 0);
         Value *v = julia_to_native(crt, toboxed, declrt, retval,
-                false, false, false, false, 0, &ctx, NULL);
+                false, false, false, 0, &ctx, NULL);
         r = llvm_type_rewrite(v, crt, prt, false, false, issigned, &ctx);
         if (sret)
             builder.CreateStore(r, sretPtr);
@@ -4019,16 +4030,14 @@ static Function *jl_cfunction_object(jl_function_t *ff, jl_value_t *declrt, jl_t
 
     // Backup the info for the nested compile
     JL_LOCK(&codegen_lock);
-    BasicBlock *old = nested_compile ? builder.GetInsertBlock() : NULL;
+    IRBuilderBase::InsertPoint old = builder.saveAndClearIP();
     DebugLoc olddl = builder.getCurrentDebugLocation();
     bool last_n_c = nested_compile;
     nested_compile = true;
     Function *f = gen_cfun_wrapper(ff, crt, (jl_tupletype_t*)argt, sf, declrt, (jl_tupletype_t*)sigt);
     // Restore the previous compile context
-    if (old != NULL) {
-        builder.SetInsertPoint(old);
-        builder.SetCurrentDebugLocation(olddl);
-    }
+    builder.restoreIP(old);
+    builder.SetCurrentDebugLocation(olddl);
     nested_compile = last_n_c;
     JL_UNLOCK(&codegen_lock); // Might GC
     JL_GC_POP();
@@ -4117,7 +4126,7 @@ static Function *gen_jlcall_wrapper(jl_method_instance_t *lam, Function *f, bool
 }
 
 // Compile to LLVM IR, using a specialized signature if applicable.
-static std::unique_ptr<Module> emit_function(jl_method_instance_t *lam, jl_code_info_t *src, jl_llvm_functions_t *declarations, jl_cgparams_t *params)
+static std::unique_ptr<Module> emit_function(jl_method_instance_t *lam, jl_code_info_t *src, jl_llvm_functions_t *declarations, const jl_cgparams_t *params)
 {
     jl_ptls_t ptls = jl_get_ptls_states();
     assert(declarations && "Capturing declarations is always required");
@@ -5164,17 +5173,27 @@ static std::unique_ptr<Module> emit_function(jl_method_instance_t *lam, jl_code_
 
 // --- initialization ---
 
-MDNode *tbaa_make_child(const char *name, MDNode *parent, bool isConstant=false)
+std::pair<MDNode*,MDNode*> tbaa_make_child(const char *name, MDNode *parent=nullptr, bool isConstant=false)
 {
-    MDNode *n = mbuilder->createTBAANode(name,parent,isConstant);
+    static MDBuilder *mbuilder = new MDBuilder(jl_LLVMContext);
+    static MDNode *tbaa_root = mbuilder->createTBAARoot("jtbaa");
+    if (!parent)
+        parent = tbaa_root;
+#if JL_LLVM_VERSION >= 30700
+    MDNode *scalar = mbuilder->createTBAAScalarTypeNode(name, parent);
+    MDNode *n = mbuilder->createTBAAStructTagNode(scalar, scalar, 0, isConstant);
+#else
+    MDNode *n = mbuilder->createTBAANode(name, parent, isConstant);
+    MDNode *scalar = n;
 #if JL_LLVM_VERSION < 30600
 #if JL_LLVM_VERSION >= 30500
-    n->setValueName( ValueName::Create(name));
+    n->setValueName(ValueName::Create(name));
 #else
-    n->setValueName( ValueName::Create(name, name+strlen(name)));
+    n->setValueName(ValueName::Create(name, name + strlen(name)));
 #endif
 #endif
-    return n;
+#endif
+    return std::make_pair(n, scalar);
 }
 
 static GlobalVariable *global_to_llvm(const std::string &cname, void *addr, Module *m)
@@ -5278,23 +5297,25 @@ extern "C" void jl_fptr_to_llvm(jl_fptr_t fptr, jl_method_instance_t *lam, int s
 
 static void init_julia_llvm_meta(void)
 {
-    mbuilder = new MDBuilder(jl_LLVMContext);
-    MDNode *tbaa_root = mbuilder->createTBAARoot("jtbaa");
-    tbaa_gcframe = tbaa_make_child("jtbaa_gcframe", tbaa_root);
-    tbaa_stack = tbaa_make_child("jtbaa_stack", tbaa_root);
-    tbaa_data = tbaa_make_child("jtbaa_data", tbaa_root);
-    tbaa_tag = tbaa_make_child("jtbaa_tag", tbaa_data);
-    tbaa_binding = tbaa_make_child("jtbaa_binding", tbaa_data);
-    tbaa_value = tbaa_make_child("jtbaa_value", tbaa_data);
-    tbaa_mutab = tbaa_make_child("jtbaa_mutab", tbaa_value);
-    tbaa_immut = tbaa_make_child("jtbaa_immut", tbaa_value);
-    tbaa_arraybuf = tbaa_make_child("jtbaa_arraybuf", tbaa_data);
-    tbaa_array = tbaa_make_child("jtbaa_array", tbaa_root);
-    tbaa_arrayptr = tbaa_make_child("jtbaa_arrayptr", tbaa_array);
-    tbaa_arraysize = tbaa_make_child("jtbaa_arraysize", tbaa_array);
-    tbaa_arraylen = tbaa_make_child("jtbaa_arraylen", tbaa_array);
-    tbaa_arrayflags = tbaa_make_child("jtbaa_arrayflags", tbaa_array);
-    tbaa_const = tbaa_make_child("jtbaa_const", tbaa_root, true);
+    tbaa_gcframe = tbaa_make_child("jtbaa_gcframe").first;
+    tbaa_stack = tbaa_make_child("jtbaa_stack").first;
+    MDNode *tbaa_data_scalar;
+    std::tie(tbaa_data, tbaa_data_scalar) = tbaa_make_child("jtbaa_data");
+    tbaa_tag = tbaa_make_child("jtbaa_tag", tbaa_data_scalar).first;
+    tbaa_binding = tbaa_make_child("jtbaa_binding", tbaa_data_scalar).first;
+    MDNode *tbaa_value_scalar;
+    std::tie(tbaa_value, tbaa_value_scalar) =
+        tbaa_make_child("jtbaa_value", tbaa_data_scalar);
+    tbaa_mutab = tbaa_make_child("jtbaa_mutab", tbaa_value_scalar).first;
+    tbaa_immut = tbaa_make_child("jtbaa_immut", tbaa_value_scalar).first;
+    tbaa_arraybuf = tbaa_make_child("jtbaa_arraybuf", tbaa_data_scalar).first;
+    MDNode *tbaa_array_scalar;
+    std::tie(tbaa_array, tbaa_array_scalar) = tbaa_make_child("jtbaa_array");
+    tbaa_arrayptr = tbaa_make_child("jtbaa_arrayptr", tbaa_array_scalar).first;
+    tbaa_arraysize = tbaa_make_child("jtbaa_arraysize", tbaa_array_scalar).first;
+    tbaa_arraylen = tbaa_make_child("jtbaa_arraylen", tbaa_array_scalar).first;
+    tbaa_arrayflags = tbaa_make_child("jtbaa_arrayflags", tbaa_array_scalar).first;
+    tbaa_const = tbaa_make_child("jtbaa_const", nullptr, true).first;
 }
 
 static void init_julia_llvm_env(Module *m)

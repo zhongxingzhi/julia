@@ -145,6 +145,7 @@ end
 @deprecate chol(A::Number, ::Type{Val{:L}})         ctranspose(chol(A))
 @deprecate chol(A::AbstractMatrix, ::Type{Val{:L}}) ctranspose(chol(A))
 
+
 # Number updates
 
 # rem1 is inconsistent for x==0: The result should both have the same
@@ -1119,14 +1120,18 @@ Filesystem.stop_watching(stream::Filesystem._FDWatcher) = depwarn("stop_watching
 # #19288
 eval(Base.Dates, quote
     function recur{T<:TimeType}(fun::Function, dr::StepRange{T}; negate::Bool=false, limit::Int=10000)
-        depwarn("Dates.recur is deprecated, use filter instead.",:recur)
+        Base.depwarn("Dates.recur is deprecated, use filter instead.",:recur)
         if negate
-            filter(x -> !f(x), dr)
+            filter(x -> !fun(x), dr)
         else
-            filter(f, dr)
+            filter(fun, dr)
         end
      end
      recur{T<:TimeType}(fun::Function, start::T, stop::T; step::Period=Day(1), negate::Bool=false, limit::Int=10000) = recur(fun, start:step:stop; negate=negate)
 end)
+
+# #18931
+@deprecate cummin(A, dim=1) accumulate(min, A, dim=1)
+@deprecate cummax(A, dim=1) accumulate(max, A, dim=1)
 
 # End deprecations scheduled for 0.6

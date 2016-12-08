@@ -103,6 +103,12 @@ cd(dirname(@__FILE__)) do
     and Brokens from the worker and the full information about all errors and
     failures encountered running the tests. This information will be displayed
     as a summary at the end of the test run.
+
+    If a test failed, returning an `Exception` that is not a `RemoteException`,
+    it is likely the julia process running the test has encountered some kind
+    of internal error, such as a segfault.  The entire testset is marked as
+    Errored, and execution continues until the summary at the end of the test
+    run, where the test file is printed out as the "failed expression".
     =#
     o_ts = Base.Test.DefaultTestSet("Overall")
     Base.Test.push_testset(o_ts)
@@ -141,6 +147,16 @@ cd(dirname(@__FILE__)) do
                 Base.Test.record(o_ts, fake)
                 Base.Test.pop_testset()
             end
+        elseif isa(res[2][1], Exception)
+            # If this test raised an exception that is not a RemoteException, that means
+            # the test runner itself had some problem, so we may have hit a segfault
+            # or something similar.  Record this testset as Errored.
+            o_ts.anynonpass = true
+            fake = Base.Test.DefaultTestSet(res[1])
+            Base.Test.record(fake, Base.Test.Error(:test_error, res[1], res[2][1], []))
+            Base.Test.push_testset(fake)
+            Base.Test.record(o_ts, fake)
+            Base.Test.pop_testset()
         end
     end
     println()
@@ -155,7 +171,7 @@ cd(dirname(@__FILE__)) do
     print_with_color(:white, rpad("Test:",name_align," "), " | ")
     print_with_color(:white, "Total time (s): | GC time (s): | Percent in gc: | Allocated (MB): | RSS (MB):\n")
     for res in results
-        if !isa(res[2][1], RemoteException)
+        if !isa(res[2][1], Exception)
             print_with_color(:white, rpad("$(res[1])",name_align," "), " | ")
             time_str = @sprintf("%7.2f",res[2][2])
             print_with_color(:white, rpad(time_str,elapsed_align," "), " | ")

@@ -72,6 +72,9 @@ cd(dirname(@__FILE__)) do
                     print_with_color(:white, rpad(time_str,elapsed_align," "), " | ")
                     gc_str = @sprintf("%7.2f",resp[5].total_time/10^9)
                     print_with_color(:white, rpad(gc_str,gc_align," "), " | ")
+
+                    # since there may be quite a few digits in the percentage,
+                    # the left-padding here is less to make sure everything fits
                     percent_str = @sprintf("%5.2f",100*resp[5].total_time/(10^9*resp[2]))
                     print_with_color(:white, rpad(percent_str,percent_align," "), " | ")
                     alloc_str = @sprintf("%5.2f",resp[3]/2^20)

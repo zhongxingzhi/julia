@@ -5,7 +5,7 @@ default: html
 # You can set these variables from the command line.
 SRCDIR           := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 JULIAHOME        := $(abspath $(SRCDIR)/..)
-JULIA_EXECUTABLE := $(JULIAHOME)/usr/bin/julia
+JULIA_EXECUTABLE := $(build_bindir)/julia
 
 .PHONY: help clean cleanall html pdf linkcheck doctest check
 
